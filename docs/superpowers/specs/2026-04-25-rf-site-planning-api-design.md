@@ -238,15 +238,44 @@ A Run is a first-class persisted record but not a catalog entity (no name-based 
 
 Ships under a reserved owner key (`system`), all entries `share=shared`, read-only. The library carries vendor-specific instances built on top of the generic catalog primitives — Antenna, Radio Profile, Equipment Profile — without those primitives encoding any vendor concept. Each seed entry is a concrete instance of the same shapes a deployment operator would create themselves.
 
-Bundled categories with representative entries (the list expands as plugins land; this is illustrative, not exhaustive):
+Bundled categories with concrete entries (the list expands as plugins land; this is the v1 baseline that ships with the system, not an exhaustive ceiling):
 
-- **Antennas.** Omni 2/3/6/8 dBi reference; generic sector 60°/90°/120°; sub-GHz IoT endpoint patches; drone/RTK 2.4 GHz approximations.
-- **Radio Profiles.** LoRa-868-EU, LoRa-915-US (LoRa link-type plugin); LTE common bands (LTE plugin); generic 2.4 GHz drone C2 (drone_c2 plugin); 2.4 GHz RTK base/rover (rtk plugin).
+- **Antennas.**
+  - Omni reference: 2 / 3 / 6 / 8 dBi vertical, 360° azimuth.
+  - Generic sector: 60° / 90° / 120° HPBW at 12 / 14 / 17 dBi gain (LTE-band and sub-GHz variants).
+  - Sub-GHz IoT endpoint patches (LoRa 868 / 915 MHz, ~2 dBi).
+  - Drone / RTK 2.4 GHz omni approximations (5–8 dBi).
+  - **Yagi / log-periodic** (new): 3-element ~7 dBi / 60° HPBW and 5-element ~10 dBi / 45° HPBW reference patterns at sub-GHz (148–152, 216, 433, 868, 915 MHz tunings) — the standard hand-held wildlife-tracker shape.
+  - **VHF marine / PMR whips** (new): 162 MHz and 446 MHz vertical, 3 dBi.
+
+- **Radio Profiles.**
+  - `LoRa-868-EU`, `LoRa-915-US`, `LoRa-433-AS` (LoRa plugin) at SF7…SF12 across the standard bandwidths.
+  - **`LoRa-915-mesh`** (new): generic 915 MHz mesh radio profile suitable for Meshtastic-class ranger comms.
+  - LTE common bands B1/B3/B7/B20/B28 and Cat-M1 / NB-IoT (LTE plugin).
+  - Generic 2.4 GHz drone C2 (drone_c2 plugin), with 5.8 GHz variant.
+  - 2.4 GHz RTK base/rover (rtk plugin).
+  - **`vhf-telemetry-150`, `vhf-telemetry-216`** (new): narrowband VHF wildlife-collar telemetry profiles (registered by the bundled `vhf_telemetry` link-type plugin, §4.6). Distinct from LoRa collars in carrier, bandwidth (≤ 25 kHz), and propagation regime.
+  - **`ais-class-b-162`** (new): 162 MHz AIS-like tracker profile for marine / riverine ranger and vessel telemetry.
+
 - **Equipment Profiles — autonomous drone docks** (built on `drone_c2` Radio + 2.4 GHz dock antenna + `Site` for the dock location). Seed entries cover specific dock products such as DJI Dock 2; operators clone-and-customize for other vendors.
-- **Equipment Profiles — sub-GHz IoT endpoints** (built on a LoRa Radio Profile + an endpoint antenna). Seed entries: `camera-trap-lora-rx`, `fence-sensor-lora-rx`, `gate-sensor-lora-rx`, `wildlife-collar-lora-tx`. Each is an Equipment Profile — a deployment-shaped concept built on the generic catalog primitives, not a baked-in entity type.
-- **Equipment Profiles — LTE backhaul** (LTE Radio + handset/CPE antenna).
+
+- **Equipment Profiles — sub-GHz IoT endpoints** (built on a LoRa Radio Profile + an endpoint antenna): `camera-trap-lora-rx`, `fence-sensor-lora-rx`, `gate-sensor-lora-rx`, `wildlife-collar-lora-tx`.
+  - **New v1 seeds:** `camera-trap-lte-catm1-rx` (cellular trail-cam variant), `meshtastic-node-915-tx`, `acoustic-sensor-lora-rx` (low-rate audio classifiers).
+
+- **Equipment Profiles — wildlife telemetry** (new category, built on a `vhf_telemetry` Radio Profile + endpoint antenna):
+  - `wildlife-collar-vhf-large` — large-mammal collar (rhino, elephant, lion), ~1 W EIRP, integrated whip.
+  - `wildlife-collar-vhf-small` — bird/small-mammal tag, ~10 mW EIRP, loop antenna.
+  - `vhf-yagi-handheld-3el` — ranger / researcher Rx pairing the 3-element Yagi with a generic VHF receiver.
+
+- **Equipment Profiles — LTE backhaul** (LTE Radio + handset/CPE antenna). Includes a Cat-M1 low-power IoT seed.
+
 - **Equipment Profiles — RTK base/rover** (RTK Radio + 2.4 GHz omni). Seed entry covers DJI D-RTK 3 as an example concrete instance; the underlying primitives are vendor-neutral.
-- **System ClutterTables.** ESA WorldCover and Copernicus CGLS taxonomies, pre-tuned per ITU-R P.833 / P.2108 across LoRa, LTE, 2.4, 5.8 GHz bands, with per-class `depolarization_factor` populated.
+
+- **Equipment Profiles — satellite uplink scaffolds** (new): `iridium-sbd-modem-tx` shape, modeling only the terrestrial-visible portion. The space-segment link itself is out of v1 scope (no satellite link-type plugin ships); the profile shape lets operators model "ranger handheld → Iridium modem" as a terrestrial micro-link without committing to a satellite model.
+
+- **System ClutterTables.** ESA WorldCover and Copernicus CGLS taxonomies, pre-tuned per ITU-R P.833 / P.2108 across VHF (148/216 MHz), LoRa, LTE, 2.4, and 5.8 GHz bands, with per-class `depolarization_factor` populated.
+
+The full bundled set is materialized as a seed file at [`seed/standard-profile-library.json`](./seed/standard-profile-library.json) and loaded into the catalog DB on first boot of the system.
 
 Operators clone-and-customize but cannot mutate `system`-owned entries. New device types — a different sensor product, a new dock vendor, a non-RF telemetry endpoint — are added by creating Equipment Profiles in the catalog; no spec change is needed unless the device introduces a fundamentally new link-type, in which case the operator (or a plugin author) registers a link-type plugin per §4.6.
 
@@ -403,7 +432,37 @@ Every analysis flows through a subset of these stages, in order:
 11. **Render artifacts.** Format the result into every canonical artifact required and every derivative the caller requested in `outputs[]`.
 12. **Persist & finalize.** Write artifacts to artifact store, write Run record, trigger webhook if async.
 
-The pipeline is the *logical* contract. Implementations may vectorize stages 5–9 across many sample pairs at once.
+Visualized, with the two pluggable extension points called out:
+
+```mermaid
+flowchart TD
+    S1[1. Resolve inputs<br/>freeze inputs_resolved]
+    S2[2. Validate compatibility<br/>frequency, bands, polarization, AOI bounds]
+    S3[3. Plan geometry samples<br/>op-specific Tx/Rx pairing]
+    S4[4. Load geo data<br/>DTM / DSM / clutter / buildings]
+    S5[5. Build terrain profiles<br/>great-circle elevation samples]
+    S6[6. Apply clutter overlay<br/>per-class path attenuation]
+    S7[7. Apply antenna gains<br/>+ polarization mismatch §4.5]
+    S8[8. Run propagation model<br/>plugin: P.1812 / ITM / P.528 / ...]
+    S9[9. Aggregate link budget<br/>received power, fade margin, availability]
+    S10[10. Emit link-type semantics<br/>plugin: LoRa / LTE / drone_c2 / rtk / ...]
+    S11[11. Render artifacts<br/>canonicals + requested derivatives]
+    S12[12. Persist & finalize<br/>store, Run record, webhook]
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9 --> S10 --> S11 --> S12
+
+    REG1[[Propagation model registry §4.2-4.4]]
+    REG2[[Link-type plugin registry §4.6]]
+    REG1 -.selected per call.-> S8
+    REG2 -.dispatched if link_type ≠ generic.-> S10
+
+    classDef plugin fill:#fef3c7,stroke:#d97706,stroke-width:2px;
+    class S8,S10 plugin;
+    classDef registry fill:#e0e7ff,stroke:#4338ca,stroke-dasharray: 5 3;
+    class REG1,REG2 registry;
+```
+
+The pipeline is the *logical* contract. Implementations may vectorize stages 5–9 across many sample pairs at once. Stages 6 and 8–10 may be skipped when the corresponding inputs are absent (e.g., no clutter raster → stage 6 is a no-op; `link_type = generic` → stage 10 is a no-op).
 
 ### 4.2 Model plugin contract
 
@@ -458,6 +517,32 @@ When `propagation_model = auto` (the default), the engine picks per-call by:
 
 A caller can pin a specific model (`propagation_model = "p1812"`) to override auto-select. If the pinned model is unsuitable (out of frequency range, missing required data tier), the request fails with `PINNED_MODEL_OUT_OF_RANGE` or `PINNED_MODEL_DATA_TIER_INSUFFICIENT`.
 
+Decision flow:
+
+```mermaid
+flowchart TD
+    START([propagation_model = auto])
+    PINNED([propagation_model = p1812 / itm / ...])
+    CHECK_PIN{In freq range?<br/>Required tier available?}
+    PIN_FAIL[/Reject:<br/>PINNED_MODEL_OUT_OF_RANGE<br/>or PINNED_MODEL_DATA_TIER_INSUFFICIENT/]
+    USE_PIN[Use pinned model]
+
+    SCEN[Derive scenario from<br/>operation × link_type × geometry<br/>e.g. Op E + drone_c2 → air_to_ground<br/>e.g. Op B + LoRa terrestrial → terrestrial_area]
+    FREQ[Filter plugins by<br/>freq_range_mhz covers radio freq]
+    SCORE[Score remaining by<br/>scenario_suitability scenario]
+    DOWN[Down-weight plugins where<br/>required_data_tiers.min &gt; AOI tier]
+    PICK[Pick highest score<br/>tie-break by deployment preference order]
+    REC[Record in Run.models_used<br/>surface in response]
+
+    START --> SCEN --> FREQ --> SCORE --> DOWN --> PICK --> REC
+    PINNED --> CHECK_PIN
+    CHECK_PIN -- no --> PIN_FAIL
+    CHECK_PIN -- yes --> USE_PIN --> REC
+
+    classDef fail fill:#fee2e2,stroke:#b91c1c;
+    class PIN_FAIL fail;
+```
+
 ### 4.5 Polarization mismatch
 
 After Tx/Rx antenna gains are applied, the engine computes mismatch loss in two steps.
@@ -493,7 +578,7 @@ The 3 dB floor avoids implausibly clean cross-pol in dense canopy. The computed 
 
 ### 4.6 Link-type plugin contract
 
-The `link_type` field on Radio Profiles is an open string. Only `generic` is built into the core engine; every other link-type — `lora`, `lte`, `drone_c2`, `rtk`, and any future addition (5G NR, satellite L/S, ham VHF/UHF, Wi-Fi mesh, etc.) — is registered by a link-type plugin. Bundled plugins ship by default; operators can install additional plugins without spec changes.
+The `link_type` field on Radio Profiles is an open string. Only `generic` is built into the core engine; every other link-type — `lora`, `lte`, `drone_c2`, `rtk`, `vhf_telemetry`, and any future addition (5G NR, satellite L/S, ham VHF/UHF, Wi-Fi mesh, etc.) — is registered by a link-type plugin. Bundled plugins ship by default; operators can install additional plugins without spec changes.
 
 A link-type plugin declares:
 
@@ -543,7 +628,7 @@ LinkTypePluginInterface {
 
 **Versioning and reproducibility.** A plugin's version string flows through `Run.models_used[]` alongside propagation models, so reruns are reproducible against the exact plugin revision.
 
-**Bundled plugins.** v1 ships `lora`, `lte`, `drone_c2`, `rtk`. Their declared outputs and accepted metrics are documented in §6.2 and §7.3 respectively; those sections are the authoritative reference for the bundled contracts.
+**Bundled plugins.** v1 ships `lora`, `lte`, `drone_c2`, `rtk`, and `vhf_telemetry` (narrowband VHF wildlife/asset trackers, ≤ 25 kHz channels at 148–152 MHz and 216–220 MHz). Their declared outputs and accepted metrics are documented in §6.2 and §7.3 respectively; those sections are the authoritative reference for the bundled contracts.
 
 ---
 
@@ -610,6 +695,46 @@ An optional artifact `fidelity_tier_raster` (UInt8 GeoTIFF) records the per-pixe
 **Fidelity floors.** Two knobs:
 - `min_fidelity_tier: <tier>` — **per-pixel floor**. Every analyzed pixel must reach this tier; otherwise the run fails fast with `FIDELITY_FLOOR_NOT_MET`.
 - `min_fidelity_coverage: { tier: <tier>, fraction: 0..1 }` — coverage floor. The given fraction of pixels must reach the given tier; otherwise fails with `FIDELITY_FLOOR_NOT_MET`.
+
+The full decision — from per-pixel tier evaluation through floor checks to terminal Run status:
+
+```mermaid
+flowchart TD
+    EVAL[Evaluate fidelity tier per analyzed pixel<br/>from layers actually loaded]
+    AGG[Aggregate per-Run:<br/>dominant, min, max<br/>+ max_possible from AOI data]
+
+    FLOOR_PIX{min_fidelity_tier set?}
+    PIX_OK{every pixel ≥ floor?}
+    FLOOR_COV{min_fidelity_coverage set?}
+    COV_OK{fraction of pixels ≥ tier ≥ required fraction?}
+    FAIL[/FAILED<br/>FIDELITY_FLOOR_NOT_MET/]
+
+    COMPARE{dominant == max_possible?}
+    COMPLETED[/COMPLETED/]
+    PARTIAL[/PARTIAL<br/>warning FIDELITY_DEGRADED/]
+
+    EVAL --> AGG
+    AGG --> FLOOR_PIX
+    FLOOR_PIX -- yes --> PIX_OK
+    FLOOR_PIX -- no --> FLOOR_COV
+    PIX_OK -- no --> FAIL
+    PIX_OK -- yes --> FLOOR_COV
+    FLOOR_COV -- yes --> COV_OK
+    FLOOR_COV -- no --> COMPARE
+    COV_OK -- no --> FAIL
+    COV_OK -- yes --> COMPARE
+    COMPARE -- yes --> COMPLETED
+    COMPARE -- no --> PARTIAL
+
+    classDef fail fill:#fee2e2,stroke:#b91c1c;
+    classDef partial fill:#fef3c7,stroke:#d97706;
+    classDef ok fill:#dcfce7,stroke:#16a34a;
+    class FAIL fail;
+    class PARTIAL partial;
+    class COMPLETED ok;
+```
+
+The `max_possible` comparison is what surfaces "you could have gotten more from this AOI" — a `PARTIAL` here is purely informational (the run produced valid results) and is distinct from a hard `FAILED` from a floor violation.
 
 ### 5.5 Coordinate systems & projections
 
@@ -679,6 +804,11 @@ Emitted when `radio.link_type ≠ generic` and the caller opts in via the `outpu
 **RTK (`rtk`):**
 - `rtk_pass_fail` — per-pixel pass/fail at correction-link sensitivity.
 - `rtk_range_envelope` — GeoJSON polygon of the RTK base/relay's effective correction coverage.
+
+**VHF wildlife/asset telemetry (`vhf_telemetry`):**
+- `vhf_detection_probability` — per-pixel probability the receiver detects a beacon within a configurable listening window, given Tx duty cycle, fading model, and Rx noise figure. Encodes the "you may need to wait for a beacon" reality of narrowband telemetry.
+- `vhf_bearing_quality` — per-pixel categorical (`good` / `marginal` / `unusable`) for direction-finding from a Yagi-equipped receiver, derived from SNR and multipath risk in the active clutter classes.
+- `vhf_range_envelope` — GeoJSON polygon of the maximum reliable detection range for the declared receiver setup.
 
 ### 6.3 Color mapping
 
@@ -758,7 +888,8 @@ A set of observations:
       freq_mhz,
       bandwidth_khz,
       observed_signal_dbm,
-      observed_metric,     # 'rssi' | 'rsrp' | 'rsrq' | 'sinr' | 'snr'
+      observed_metric,     # 'rssi' | 'rsrp' | 'rsrq' | 'sinr' | 'snr' |
+                           # 'detection_count' | 'bearing_quality'
       timestamp,
       seq,                 # required when ordered = true
       source,              # 'manual' | 'camera_trap_log' | 'drone_telemetry' |
@@ -794,6 +925,7 @@ When a Run is submitted with a `measurement_set_ref` attached (or when a Run's A
    | lte | `rsrp`, `rsrq`, `sinr` |
    | drone_c2 | `rssi` |
    | rtk | `rssi` |
+   | vhf_telemetry | `rssi`, `snr`, `detection_count`, `bearing_quality` |
    | generic | `rssi` |
 
    Mismatched points are filtered out and counted with reason `OBSERVED_METRIC_MISMATCH`. Cross-metric conversion (e.g., RSSI → RSRP) is **not** performed.
@@ -1057,8 +1189,11 @@ Legend: ✓ canonical, ✦ derivative, — not applicable.
 
 | Band | Typical link types served | Native models | Fidelity tier sensitivity |
 |---|---|---|---|
+| 148–152 MHz, 216–220 MHz | vhf_telemetry | P.1812, ITM | Medium — terrain (T1+) dominates; clutter modest at narrowband VHF |
+| 162 MHz | vhf_telemetry (AIS-like), generic | P.1812, ITM | Medium — over-water paths benefit from two-ray |
+| 433 / 446 MHz | LoRa, generic (PMR) | P.1812, ITM | High — clutter material in foliage |
 | 868 / 915 MHz (LoRa ISM) | LoRa | P.1812, ITM | High — clutter (T2+) materially affects forest predictions |
-| 600 MHz – 3.5 GHz (LTE) | LTE | P.1812, ITM | Medium — clutter helpful, DSM helpful in urban |
+| 600 MHz – 3.5 GHz (LTE, incl. Cat-M1 / NB-IoT) | LTE | P.1812, ITM | Medium — clutter helpful, DSM helpful in urban |
 | 2.4 GHz | drone_c2, rtk, generic | P.1812, ITM, P.528 (air-to-ground) | High — DSM (T3+) crucial for low-altitude links |
 | 5.8 GHz | drone_c2, rtk | P.1812, ITM, P.528 | High — same as 2.4 GHz |
 
@@ -1162,3 +1297,4 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 - **§3.2 (Operating Volume)** — `Mission / Flight Envelope` renamed to `Operating Volume`; description generalized beyond drone use cases. `dock_site_ref` replaced with two optional fields `home_site_ref` (return-to-home / launch-recovery anchor) and `host_site_ref` (operational anchor for non-recovering deployments). API path `/v1/missions` → `/v1/operating-volumes`.
 - **§4.6 (new)** — Link-type plugin contract parallel to §4.2 model plugin contract; declares `LINK_TYPE_NOT_REGISTERED` (Appendix D).
 - **§6.2, §7.3, Appendix B** — `drtk` link-type renamed to `rtk` (RTK is the general concept; "relay" is not). Output keys `drtk_pass_fail` / `drtk_range_envelope` → `rtk_pass_fail` / `rtk_range_envelope`.
+- **§3.4, §4.1, §4.4, §4.6, §5.4, §6.2, §7.3, Appendix B** (post-review patch) — Three new mermaid diagrams (12-stage pipeline, model auto-select decision, fidelity-tier resolution). New bundled `vhf_telemetry` link-type plugin (148–152 / 216–220 MHz narrowband wildlife/asset trackers) with declared outputs (`vhf_detection_probability`, `vhf_bearing_quality`, `vhf_range_envelope`) and accepted observed metrics (`detection_count`, `bearing_quality`). Standard profile library expanded with Yagi/log-periodic antennas, VHF telemetry collars (large/small mammal), Meshtastic-class 915 MHz, LTE Cat-M1 / NB-IoT, AIS-like 162 MHz, and an Iridium-SBD scaffold profile. Seed library materialized as `seed/standard-profile-library.json`.

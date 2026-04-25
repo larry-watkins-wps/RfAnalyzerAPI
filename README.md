@@ -14,17 +14,22 @@ RfAnalyzer/
 ├── CLAUDE.md                                          AI-assistant working agreements
 ├── .gitignore
 └── docs/superpowers/specs/
-    ├── 2026-04-25-rf-site-planning-api-design.md     Spec v2 — source of truth (~1100 lines, 5 mermaid diagrams)
+    ├── 2026-04-25-rf-site-planning-api-design.md     Spec v2 — source of truth (~1300 lines, 8 mermaid diagrams)
     ├── 2026-04-25-analysis-requests.schema.json      JSON Schema 2020-12 for Op A–E request bodies
     ├── 2026-04-25-rf-site-planning-api.openapi.yaml  OpenAPI 3.1 — every endpoint + every entity schema
-    └── examples/
-        ├── README.md                                  Index of examples
-        ├── op-a-p2p.md                                Sync P2P with full link budget
-        ├── op-b-area.md                               Async area heatmap with webhook delivery
-        ├── op-c-multi-link.md                         Multi-link site report (PARTIAL run case)
-        ├── op-d-multi-tx.md                           Multi-Tx best-server with NoData & tiebreak
-        ├── op-e-voxel.md                              3D / volumetric coverage with voxel slicing
-        └── asset-upload.md                            Direct + multipart asset upload
+    ├── examples/
+    │   ├── README.md                                  Index of examples
+    │   ├── op-a-p2p.md                                Sync P2P with full link budget
+    │   ├── op-b-area.md                               Async area heatmap with webhook delivery
+    │   ├── op-c-multi-link.md                         Multi-link site report (PARTIAL run case)
+    │   ├── op-d-multi-tx.md                           Multi-Tx best-server with NoData & tiebreak
+    │   ├── op-e-voxel.md                              3D / volumetric coverage with voxel slicing
+    │   └── asset-upload.md                            Direct + multipart asset upload
+    └── seed/
+        ├── README.md                                  Boot sequence + coverage notes
+        ├── standard-profile-library.json              System-owned catalog seed (18 antennas, 17 radio profiles, 18 equipment profiles, 2 clutter tables)
+        ├── antenna_patterns/                          Bundled MSI Planet pattern files referenced by sha256
+        └── generate_patterns.py                       Reproduction script for the pattern files
 ```
 
 ## What the API does
@@ -94,7 +99,7 @@ Concrete base-mismatch table (V/H/RHCP/LHCP/slant-45/dual) plus a path-aggregate
 Attach a Measurement Set to a Run and the engine produces an `error_db` per matched point, plus aggregates (`mean`, `median`, `rmse`, `max_abs`, `bias_direction`, per-clutter-class breakdown). Filter rules are dimensionally coherent: frequency tolerance defaults to half the radio's bandwidth; metric coherence is enforced (LoRa accepts `rssi`/`snr`; LTE accepts `rsrp`/`rsrq`/`sinr`; etc.). No cross-metric conversion. Multiple measurement sets attached to one Run produce multiple report blocks.
 
 ### Single-tenant Docker-Compose deployment (spec §2.2, §8.5)
-Bundled global baseline (SRTM-30 DTM, ESA WorldCover land-cover) plus standard profile library plus system ClutterTables seed on first boot of the catalog DB and geo store. Local mode is fully offline-capable. Asset upload/download URLs proxy through the API service for parity with cloud deployments.
+Bundled global baseline (SRTM-30 DTM, ESA WorldCover land-cover) plus the [standard profile library](docs/superpowers/specs/seed/standard-profile-library.json) plus system ClutterTables seed on first boot of the catalog DB and geo store. Local mode is fully offline-capable. Asset upload/download URLs proxy through the API service for parity with cloud deployments.
 
 ### Observability (spec §8.6)
 Structured JSON logs per request and per pipeline stage; Prometheus-style metrics (runs by status/operation, queue depth, worker stage timings, artifact-store bytes, GC sweep stats); per-Run trace retrievable from the Run record; `/healthz` (process liveness) and `/readyz` (dependency reachability).
@@ -113,7 +118,7 @@ These codes are mirrored verbatim in the OpenAPI `ProblemDetail.code` enum so cl
 - Cite spec sections as `§N.M` — line numbers move when the doc evolves.
 - Timestamps: RFC 3339 UTC. Frequencies: MHz unless suffixed (`_khz`, `_ghz`). Altitudes carry an explicit `altitude_reference: "agl" | "amsl"`.
 - Hashes: SHA-256, lowercase hex; `sha256:` prefix when used as identifiers.
-- Diagrams: mermaid, embedded in the spec markdown — five included (service topology, mode-flow sequence, asset-upload sequence, reference graph ER, run-lifecycle state).
+- Diagrams: mermaid, embedded in the spec markdown — eight included (service topology, mode-flow sequence, asset-upload sequence, reference graph ER, run-lifecycle state, 12-stage pipeline, model auto-select, fidelity-tier resolution).
 
 See [CLAUDE.md](CLAUDE.md) for working agreements with AI assistants.
 
@@ -168,7 +173,8 @@ See [CLAUDE.md](CLAUDE.md) for working agreements with AI assistants.
 | JSON Schema | Draft 2020-12, derived from spec |
 | OpenAPI | 3.1, version `0.2.0-draft`, derived from spec |
 | Examples | 5 op walkthroughs + asset upload |
-| Diagrams | 5 mermaid (service topology, mode flow, asset upload, reference graph, run lifecycle) |
+| Seed library | 18 antennas, 17 radio profiles, 18 equipment profiles, 2 clutter tables, 2 bundled antenna-pattern asset files |
+| Diagrams | 8 mermaid (service topology, mode flow, asset upload, reference graph, run lifecycle, 12-stage pipeline, model auto-select, fidelity-tier resolution) |
 | Auto-memory | seeded for AI-assisted continuation across sessions |
 | Implementation | Not started |
 

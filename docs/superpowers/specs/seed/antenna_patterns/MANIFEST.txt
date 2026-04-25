@@ -1,0 +1,4 @@
+# Bundled antenna pattern assets
+# filename	sha256	size_bytes
+generic-omni-vertical-6dbi-868mhz.msi	349bb9f8792683fb0eadc18162923f9149585b463392ca2d0f6c0e4d313630bb	6591
+generic-yagi-3el-7dbi-150mhz.msi	ad4f42522ff717509c3d88c20696c5f68c99f6cdb29b5171271e17bcfc8490aa	7095

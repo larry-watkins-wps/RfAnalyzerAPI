@@ -42,6 +42,10 @@ Each scenario JSON has the same top-level keys:
 | [`boundary-rtk-survey.json`](boundary-rtk-survey.json) | A (P2P) | `org_internal` | Op A point-to-point; `rtk` plugin; path profile + cross-section. |
 | [`ranger-vhf-handheld-comms.json`](ranger-vhf-handheld-comms.json) | B (Area) | `org_internal` | `generic` link-type for voice radio; PMR-446 patrol-area heatmap. |
 | [`multi-jurisdictional-iot.json`](multi-jurisdictional-iot.json) | B (Area) | `org_internal` | `regulatory_profile_ref` (§3.7); transboundary deployment with `enforce_regulatory: true`. |
+| [`acoustic-detector-mesh-salonga.json`](acoustic-detector-mesh-salonga.json) | D (Multi-Tx) | `org_internal` | `lora` plugin in worst-case forest clutter; `acoustic-sensor-lora-rx`; tree-cover attenuation. |
+| [`marine-ais-patrol-bazaruto.json`](marine-ais-patrol-bazaruto.json) | B (Area) | `org_internal` | AIS-class-B 162 MHz over a marine AOI; two-ray-over-water; `ais-shore-receiver-162` + `ais-tracker-162-vessel`. |
+| [`meshtastic-ranger-camp-relay.json`](meshtastic-ranger-camp-relay.json) | A (P2P) | `org_internal` | Op A on the `lora` plugin; Meshtastic LongFast 915 MHz; Fresnel + cross-section artifacts. |
+| [`vehicle-tracker-patrol-road.json`](vehicle-tracker-patrol-road.json) | B (Area) | `org_internal` | Mobile `vehicle-tracker-lora-868` rx_template; `lora` SF planning along a road corridor. |
 
 ## Running a scenario
 

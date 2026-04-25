@@ -1,0 +1,59 @@
+{
+  "id": "vehicle-tracker-patrol-road",
+  "title": "LoRa coverage along a perimeter patrol road from a single ranger-camp gateway",
+  "summary": "A ranger camp's existing LoRa gateway already covers near-field IoT (camera traps, fence sensors). The reserve now wants to instrument its patrol fleet with low-cost LoRa GPS trackers for routine after-action review and vehicle-down alerting. Op B from the gateway with the vehicle-mounted tracker as `rx_template` tells the operator which sections of the perimeter patrol road remain uplink-viable in real time, which sections require the tracker to buffer and store-and-forward on return-to-camp, and which sections will need a second gateway before any tracker deployment makes sense.",
+  "operation": "area",
+  "demonstrates": [
+    "Op B (§4.0) with mobile rx_template",
+    "vehicle-tracker-lora-868 seed equipment profile",
+    "lora link-type plugin SF planning along a road corridor"
+  ],
+  "tags": ["lora", "vehicle-tracker", "patrol-road", "asset-tracking", "malilangwe"],
+  "sites": [
+    {
+      "name": "ranger-camp-malilangwe-gateway",
+      "lat": -21.05,
+      "lon": 31.83,
+      "notes": "Existing 18 m mast at Malilangwe main camp; mains+solar."
+    }
+  ],
+  "request": {
+    "operation": "area",
+    "tx_site":      { "ref": "ranger-camp-malilangwe-gateway" },
+    "tx_equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" },
+    "rx_template":  { "ref": "vehicle-tracker-lora-868",   "owner": "shared" },
+    "aoi": {
+      "name": "malilangwe-patrol-perimeter-2026q2",
+      "bbox": { "south": -21.20, "west": 31.65, "north": -20.92, "east": 32.00 }
+    },
+    "resolution_m": 50,
+    "outputs": [
+      "geotiff",
+      "geojson_contours",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "lora_sf",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "errors_must_not_occur": ["LINK_TYPE_NOT_REGISTERED", "ANTENNA_OUT_OF_BAND"],
+    "models_used_likely": ["ITU-R P.1812"],
+    "artifact_keys_present": [
+      "geotiff",
+      "geojson_contours",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "stats_ranges": {
+      "fraction_pixels_above_sensitivity_min": 0.30,
+      "fraction_pixels_above_sensitivity_max": 0.85,
+      "fraction_pixels_at_sf12_min": 0.10
+    }
+  },
+  "notes": "The vehicle-tracker-lora-868 profile assumes a 2 m AGL roof whip — substitute vehicle-tracker-lte-catm1 to compare against cellular Cat-M1 coverage where a public LTE B20 cell is reachable. Operators wanting only the road-corridor view should clip the resulting raster to a buffered patrol-road geometry post-hoc; v2 does not support polyline-shaped AOIs in Op B (§4.0). The gateway-side equipment matches fence-line, rhino-collar, and camera-trap-mesh scenarios so an operator can colocate tracker uplinks on existing infrastructure without introducing new mast equipment."
+}

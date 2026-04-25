@@ -27,7 +27,7 @@ RfAnalyzer/
     │   └── asset-upload.md                            Direct + multipart asset upload
     └── seed/
         ├── README.md                                  Boot sequence + coverage notes
-        ├── standard-profile-library.json              System-owned catalog seed (18 antennas, 17 radio profiles, 18 equipment profiles, 2 clutter tables)
+        ├── standard-profile-library.json              System-owned catalog seed (18 antennas, 17 radio profiles, 21 equipment profiles, 2 clutter tables)
         ├── antenna_patterns/                          Bundled MSI Planet pattern files referenced by sha256
         └── generate_patterns.py                       Reproduction script for the pattern files
 ```
@@ -205,7 +205,7 @@ The same rule is duplicated in [CLAUDE.md](CLAUDE.md) for AI assistants. Treat t
 | JSON Schema | Draft 2020-12, derived from spec |
 | OpenAPI | 3.1, version `0.2.0-draft`, derived from spec |
 | Examples | 5 op walkthroughs + asset upload |
-| Seed library | 18 antennas, 17 radio profiles, 18 equipment profiles, 2 clutter tables, 2 bundled antenna-pattern asset files |
+| Seed library | 18 antennas, 17 radio profiles, 21 equipment profiles, 2 clutter tables, 2 bundled antenna-pattern asset files |
 | Diagrams | 8 mermaid (service topology, mode flow, asset upload, reference graph, run lifecycle, 12-stage pipeline, model auto-select, fidelity-tier resolution) |
 | Auto-memory | seeded for AI-assisted continuation across sessions |
 | Implementation | Not started |

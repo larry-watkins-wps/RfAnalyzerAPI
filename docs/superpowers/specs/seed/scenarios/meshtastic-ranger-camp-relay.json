@@ -1,0 +1,58 @@
+{
+  "id": "meshtastic-ranger-camp-relay",
+  "title": "Meshtastic LongFast point-to-point between two Hwange ranger camps",
+  "summary": "Two ranger camps in Hwange — Shumba and Mandavu — sit ~10 km apart with low scrub and a small ridge between them. Op A computes the link budget, terrain path profile, and Fresnel-zone clearance for a Meshtastic LongFast 915 MHz link between portable nodes mounted at typical operator height (2.5 m AGL on a portable mast). The result tells the field ops lead whether the two camps are LongFast-direct, need an intermediate repeater on the intervening ridge, or should fall back to a known-degraded SF12 store-and-forward path until repeater placement is funded.",
+  "operation": "p2p",
+  "demonstrates": [
+    "Op A (§4.0) point-to-point with terrain + Fresnel artifacts",
+    "lora link-type plugin: SF planning end-to-end on a single link, not raster (§4.6)",
+    "meshtastic-node-915-tx seed equipment profile (LongFast SF11/250 kHz)",
+    "path_profile + cross_section + link_budget canonical artifacts (§6.1)"
+  ],
+  "tags": ["lora", "meshtastic", "ranger-comms", "p2p", "hwange"],
+  "sites": [
+    {
+      "name": "ranger-camp-shumba",
+      "lat": -18.71,
+      "lon": 26.11,
+      "notes": "Existing camp at Shumba picnic area."
+    },
+    {
+      "name": "ranger-camp-mandavu",
+      "lat": -18.66,
+      "lon": 26.20,
+      "notes": "Existing camp at Mandavu Dam."
+    }
+  ],
+  "request": {
+    "operation": "p2p",
+    "tx_site":      { "ref": "ranger-camp-shumba" },
+    "tx_equipment": { "ref": "meshtastic-node-915-tx", "owner": "shared" },
+    "rx_site":      { "ref": "ranger-camp-mandavu" },
+    "rx_equipment": { "ref": "meshtastic-node-915-tx", "owner": "shared" },
+    "outputs": [
+      "link_budget",
+      "path_profile",
+      "cross_section",
+      "stats"
+    ],
+    "min_fidelity_tier": "T2_TERRAIN_PLUS_CLUTTER",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "errors_must_not_occur": ["LINK_TYPE_NOT_REGISTERED", "ANTENNA_OUT_OF_BAND"],
+    "models_used_likely": ["ITU-R P.1812", "ITM"],
+    "artifact_keys_present": [
+      "link_budget",
+      "path_profile",
+      "cross_section",
+      "stats"
+    ],
+    "stats_ranges": {
+      "received_power_dbm_range": [-130, -90]
+    }
+  },
+  "notes": "Symmetric link — both ends carry the same node configuration (LongFast SF11, 22 dBm, 3 dBi vertical). Reciprocity holds; the link_budget reports a single number good for either direction. If the result returns received_power below the radio's -130 dBm sensitivity, the field ops decision is to add a relay node on the intervening ridge — the cross_section artifact tells the operator exactly where on the path the dominant obstruction sits, which is the input for siting that relay. This is the only Op A scenario in the seed library that exercises the LoRa plugin (boundary-rtk-survey covers Op A on the rtk plugin)."
+}

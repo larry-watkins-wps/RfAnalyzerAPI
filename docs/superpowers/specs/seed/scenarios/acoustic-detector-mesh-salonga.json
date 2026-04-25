@@ -1,0 +1,76 @@
+{
+  "id": "acoustic-detector-mesh-salonga",
+  "title": "LoRa acoustic gunshot/chainsaw detector mesh in dense Congo Basin forest",
+  "summary": "Tree-mounted LoRa acoustic classifiers report event flags (gunshot, chainsaw, vehicle engine) to gateway towers at three ranger posts in Salonga National Park. Op D best-server tells the operator which gateway covers each square of the interdiction zone, and the `lora_best_sf` derivative reveals where coverage exists only at SF12 — a critical signal for any operator deciding whether to add capacity, deploy a repeater, or rely on store-and-forward via patrol uplinks. The scenario deliberately exercises worst-case forest clutter (esa-worldcover class 10, ~9 dB / 100 m at 868 MHz); a non-trivial fraction of pixels will have no winner, and that no-coverage region is precisely the gap a fourth gateway would close.",
+  "operation": "multi_tx",
+  "demonstrates": [
+    "Op D (§4.0) best-server in worst-case clutter",
+    "lora link-type plugin: lora_best_sf gradient (§6.2)",
+    "esa-worldcover-2021 tree-cover attenuation accumulation (§4.5)",
+    "acoustic-sensor-lora-rx seed equipment profile"
+  ],
+  "tags": ["lora", "acoustic", "anti-poaching", "congo-basin", "gunshot-detector"],
+  "sites": [
+    {
+      "name": "ranger-post-monkoto-existing",
+      "lat": -1.95,
+      "lon": 21.10,
+      "notes": "Existing 18 m mast at Monkoto sector ranger post."
+    },
+    {
+      "name": "ranger-post-watsi-existing",
+      "lat": -2.05,
+      "lon": 20.85,
+      "notes": "Existing 15 m mast at Watsi-Kengo ranger post."
+    },
+    {
+      "name": "ranger-post-yenge-candidate",
+      "lat": -1.78,
+      "lon": 21.00,
+      "notes": "Candidate 25 m self-supporting at Yenge — gap-filler for the northern interdiction zone."
+    }
+  ],
+  "request": {
+    "operation": "multi_tx",
+    "tx_sites": [
+      { "site": { "ref": "ranger-post-monkoto-existing" }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } },
+      { "site": { "ref": "ranger-post-watsi-existing"  }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } },
+      { "site": { "ref": "ranger-post-yenge-candidate" }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } }
+    ],
+    "rx_template": { "ref": "acoustic-sensor-lora-rx", "owner": "shared" },
+    "aoi": {
+      "name": "salonga-interdiction-zone-2026q2",
+      "bbox": { "south": -2.15, "west": 20.75, "north": -1.65, "east": 21.20 }
+    },
+    "resolution_m": 100,
+    "outputs": [
+      "best_server_raster",
+      "geotiff",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "lora_sf",
+    "min_fidelity_tier": "T2_TERRAIN_PLUS_CLUTTER",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "errors_must_not_occur": ["LINK_TYPE_NOT_REGISTERED", "ANTENNA_OUT_OF_BAND"],
+    "models_used_likely": ["ITU-R P.1812"],
+    "artifact_keys_present": [
+      "best_server_raster",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster",
+      "geotiff.A", "geotiff.B", "geotiff.C"
+    ],
+    "stats_ranges": {
+      "fraction_pixels_with_a_winner_min": 0.20,
+      "fraction_pixels_with_a_winner_max": 0.65,
+      "fraction_pixels_at_sf12_min": 0.40
+    }
+  },
+  "notes": "best_server_raster sidecar maps 1→ranger-post-monkoto-existing, 2→ranger-post-watsi-existing, 3→ranger-post-yenge-candidate. Resolution is 100 m (not 50 m as in non-forest LoRa scenarios) because the AOI is large and clutter dominates over fine terrain detail at this canopy density. Sensitivity class is the deployment default (typically `org_internal`): acoustic events flag *activity*, not specific protected animals — distinct from the rhino-collar scenarios. Operators planning capacity should overlay `lora_best_sf` with their patrol route map: SF12-only zones drive uplink airtime budget and hence battery-life on every detector in that region."
+}

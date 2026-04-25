@@ -503,6 +503,14 @@
       "notes": "Tree-mounted acoustic classifier; reports event flags over LoRa."
     },
     {
+      "name": "vehicle-tracker-lora-868",
+      "radio_ref":   { "ref": "lora-868-eu-sf12", "owner": "system" },
+      "antenna_ref": { "ref": "generic-omni-vertical-2dbi", "owner": "system" },
+      "mount_height_m_agl": 2.0,
+      "cable_loss_db": 0.5,
+      "notes": "Vehicle / patrol-boat LoRa asset tracker. Roof or mast whip at vehicle-roof height. Mobile platform — operators planning a patrol route should run Op B over a bbox enclosing the road, then clip post-hoc to the corridor."
+    },
+    {
       "name": "wildlife-collar-vhf-large",
       "radio_ref":   { "ref": "vhf-telemetry-150", "owner": "system" },
       "antenna_ref": { "ref": "wildlife-collar-whip-150mhz", "owner": "system" },
@@ -536,6 +544,14 @@
       "notes": "AIS-class-B-like vessel/asset tracker; mast-mounted whip."
     },
     {
+      "name": "ais-shore-receiver-162",
+      "radio_ref":   { "ref": "ais-class-b-162", "owner": "system" },
+      "antenna_ref": { "ref": "vhf-marine-whip-162mhz-3dbi", "owner": "system" },
+      "mount_height_m_agl": 30.0,
+      "cable_loss_db": 4.0,
+      "notes": "Coastal AIS receive mast — typical 30 m self-supporting tower with a long coax run. Receiver-only role in practice, but EquipmentProfile shape carries tx_power for symmetry; use as tx_site in Op B to compute reciprocal vessel-detection coverage."
+    },
+    {
       "name": "lte-cpe-outdoor",
       "radio_ref":   { "ref": "lte-band3-1800", "owner": "system" },
       "antenna_ref": { "ref": "generic-sector-90deg-14dbi", "owner": "system" },
@@ -550,6 +566,14 @@
       "mount_height_m_agl": 1.5,
       "cable_loss_db": 0.0,
       "notes": "Body-worn handset proxy. Use cautiously: real device patterns are highly orientation-dependent."
+    },
+    {
+      "name": "vehicle-tracker-lte-catm1",
+      "radio_ref":   { "ref": "lte-catm1-band20", "owner": "system" },
+      "antenna_ref": { "ref": "generic-omni-vertical-2dbi", "owner": "system" },
+      "mount_height_m_agl": 2.0,
+      "cable_loss_db": 0.5,
+      "notes": "Vehicle / patrol-boat Cat-M1 tracker on B20 (800 MHz). Use where cellular coverage exists and a private LoRa network is impractical. The 2 dBi roof whip is band-compatible since generic-omni-vertical-2dbi covers 138-960 MHz."
     },
     {
       "name": "drone-dock-c2-2_4ghz",

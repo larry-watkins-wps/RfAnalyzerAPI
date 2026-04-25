@@ -1,0 +1,57 @@
+{
+  "id": "marine-ais-patrol-bazaruto",
+  "title": "AIS patrol-vessel detection from a coastal mast at Bazaruto Archipelago",
+  "summary": "A 30 m coastal AIS receive mast at Vilanculos covers the Bazaruto Archipelago National Park's marine AOI — the vessel-tracking layer for coordinating the ranger patrol fleet, monitoring the artisanal-fisher exemption zone, and flagging unidentified incursions. Op B fixes the shore station and computes link viability for a class-B AIS tracker (`ais-tracker-162-vessel`) at every pixel of the marine AOI. Two-ray-over-water dominates: clutter class 80 (`Permanent water bodies`) returns 0 dB attenuation and the engine should select two-ray ground reflection rather than P.1812 over the open-water portion of each path, falling back to P.1812 for the inshore terrain-influenced segments.",
+  "operation": "area",
+  "demonstrates": [
+    "Op B (§4.0) over a marine AOI",
+    "vhf_telemetry plugin at AIS-class-B 162 MHz",
+    "Two-ray-over-water propagation (clutter class 80 transparent; §4.5 model selection)",
+    "ais-shore-receiver-162 + ais-tracker-162-vessel seed equipment together"
+  ],
+  "tags": ["ais", "marine", "vhf", "patrol-fleet", "coastal"],
+  "sites": [
+    {
+      "name": "shore-mast-vilanculos",
+      "lat": -22.00,
+      "lon": 35.32,
+      "notes": "30 m self-supporting tower behind the harbor; long cable run to the receiver shack."
+    }
+  ],
+  "request": {
+    "operation": "area",
+    "tx_site":      { "ref": "shore-mast-vilanculos" },
+    "tx_equipment": { "ref": "ais-shore-receiver-162", "owner": "shared" },
+    "rx_template":  { "ref": "ais-tracker-162-vessel", "owner": "shared" },
+    "aoi": {
+      "name": "bazaruto-marine-2026q2",
+      "bbox": { "south": -22.10, "west": 35.30, "north": -21.65, "east": 35.65 }
+    },
+    "resolution_m": 100,
+    "outputs": [
+      "geotiff",
+      "geojson_contours",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "signal_strength_default",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T1_TERRAIN",
+    "errors_must_not_occur": ["LINK_TYPE_NOT_REGISTERED", "ANTENNA_OUT_OF_BAND"],
+    "models_used_likely": ["two-ray ground reflection", "ITU-R P.1812"],
+    "artifact_keys_present": [
+      "geotiff",
+      "geojson_contours",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "stats_ranges": {
+      "fraction_pixels_above_sensitivity_min": 0.50,
+      "median_received_power_dbm_range": [-115, -75]
+    }
+  },
+  "notes": "Op B treats the shore mast as TX for symmetry; by RF reciprocity the coverage map is also the vessel-uplink coverage map for class-B AIS at this shore station. Most of the AOI is open water — expect long range with strong direct path plus the classic two-ray null/peak pattern as a function of TX/RX height and distance. The Bazaruto and Benguerra islands cause shadowing for vessels in their lee; those shadow zones are a known operational gap and the reason the park has historically also relied on patrol-boat AIS forwarders. Sensitivity class is deployment default (`org_internal` typically) — AIS is open broadcast and patrol-fleet positions are routinely shared with regional fisheries authorities."
+}

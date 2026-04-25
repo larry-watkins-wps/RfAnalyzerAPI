@@ -1,0 +1,79 @@
+{
+  "id": "rhino-lora-collar-coverage",
+  "title": "LoRa rhino-collar uplink coverage across a home range with 3 gateway candidates",
+  "summary": "A reintroduced black rhino population in North Luangwa is fitted with body-worn LoRa 868 collars that uplink position bursts to gateway towers along the reserve's eastern perimeter and ranger camps. The reserve has two existing gateways and is evaluating one new candidate site. This scenario computes, for any point in the rhino home range, which gateway will receive the collar's burst with the strongest link and at which spreading factor — and, by extension, where coverage is so marginal that bursts will only land at SF12 (or not at all). Because the collared individuals are anti-poaching protected and the AOI is configured as a `restricted_species` polygon at this deployment, classification is auto-promoted; the explicit `sensitivity_class` declaration matches the auto-promotion so `OPSEC_AUTO_CLASSIFIED` is informational.",
+  "operation": "multi_tx",
+  "demonstrates": [
+    "Op D (§4.0) best-server with wildlife rx_template",
+    "best_server_raster + lora_best_sf together (§6.1, §6.2)",
+    "lora link-type plugin SF planning (§4.6)",
+    "Appendix E restricted_species class with auto-classification",
+    "wildlife-collar-lora-tx seed equipment profile"
+  ],
+  "tags": ["wildlife", "anti-poaching", "lora", "rhino", "collar"],
+  "sites": [
+    {
+      "name": "mast-mwaleshi-confluence-existing",
+      "lat": -11.93,
+      "lon": 32.18,
+      "notes": "Existing 24 m mast at the Mwaleshi/Luangwa confluence ranger camp. Mains+solar."
+    },
+    {
+      "name": "mast-luangwa-east-rim-existing",
+      "lat": -11.84,
+      "lon": 32.35,
+      "notes": "Existing 18 m mast on the eastern escarpment edge. Solar+battery."
+    },
+    {
+      "name": "mast-shiwa-foothills-candidate",
+      "lat": -12.05,
+      "lon": 32.07,
+      "notes": "Candidate; quote in for 25 m self-supporting on the western foothills, fills the gap toward the core sanctuary."
+    }
+  ],
+  "request": {
+    "operation": "multi_tx",
+    "tx_sites": [
+      { "site": { "ref": "mast-mwaleshi-confluence-existing" }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } },
+      { "site": { "ref": "mast-luangwa-east-rim-existing"   }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } },
+      { "site": { "ref": "mast-shiwa-foothills-candidate"   }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } }
+    ],
+    "rx_template": { "ref": "wildlife-collar-lora-tx", "owner": "shared" },
+    "aoi": {
+      "name": "north-luangwa-rhino-sanctuary-2026q2",
+      "bbox": { "south": -12.03, "west": 32.02, "north": -11.78, "east": 32.40 }
+    },
+    "resolution_m": 50,
+    "outputs": [
+      "best_server_raster",
+      "geotiff",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "lora_sf",
+    "min_fidelity_coverage": { "tier": "T2_TERRAIN_PLUS_CLUTTER", "fraction": 0.90 },
+    "sensitivity_class": "restricted_species",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "warnings_likely": ["OPSEC_AUTO_CLASSIFIED"],
+    "errors_must_not_occur": ["FIDELITY_FLOOR_NOT_MET", "LINK_TYPE_NOT_REGISTERED", "ANTENNA_OUT_OF_BAND"],
+    "models_used_likely": ["ITU-R P.1812"],
+    "artifact_keys_present": [
+      "best_server_raster",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster",
+      "geotiff.A", "geotiff.B", "geotiff.C"
+    ],
+    "stats_ranges": {
+      "fraction_pixels_with_a_winner_min": 0.55,
+      "fraction_pixels_with_a_winner_max": 0.95,
+      "fraction_pixels_at_sf12_min": 0.10
+    }
+  },
+  "notes": "best_server_raster uses 1-indexed values; sidecar JSON maps 1→mast-mwaleshi-confluence-existing, 2→mast-luangwa-east-rim-existing, 3→mast-shiwa-foothills-candidate. The collar's body-worn antenna at 1.0 m AGL with the patch antenna's 2 dBi gain is the limiting factor: SF12 dominates the periphery and a non-trivial fraction of pixels may have no winner at all. Operators using this scenario to size a fourth gateway should focus on the SF12 + no-winner regions of `lora_best_sf`. The whole AOI is anti-poaching sensitive: API keys submitting this scenario must carry `opsec.read_restricted_species`, and any webhook subscribed to its Run completion must be on the deployment's `opsec_authorized` allowlist (Appendix E.2, E.5)."
+}

@@ -35,6 +35,7 @@ Each scenario JSON has the same top-level keys:
 | File | Op | Sensitivity | Demonstrates |
 |---|---|---|---|
 | [`rhino-vhf-collar-tracking.json`](rhino-vhf-collar-tracking.json) | B (Area) | `restricted_species` | `vhf_telemetry` plugin (§4.6); Appendix E auto-classification; Yagi receiver semantics. |
+| [`rhino-lora-collar-coverage.json`](rhino-lora-collar-coverage.json) | D (Multi-Tx) | `restricted_species` | Op D best-server with body-worn rx_template; `lora` SF planning over a wildlife home range; Appendix E auto-classification. |
 | [`fence-line-lora-monitoring.json`](fence-line-lora-monitoring.json) | D (Multi-Tx) | `org_internal` | Op D best-server raster; `lora` plugin SF planning. |
 | [`camera-trap-mesh-coverage.json`](camera-trap-mesh-coverage.json) | C (Multi-link) | `org_internal` | Op C multi-link site report; `lora` + `lte` + `vhf_telemetry` colocated. |
 | [`anti-poaching-drone-dock.json`](anti-poaching-drone-dock.json) | E (Voxel) | `restricted_species` | Op E volumetric coverage; `drone_c2` plugin; Operating Volume; Appendix E. |

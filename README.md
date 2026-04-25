@@ -122,6 +122,38 @@ These codes are mirrored verbatim in the OpenAPI `ProblemDetail.code` enum so cl
 
 See [CLAUDE.md](CLAUDE.md) for working agreements with AI assistants.
 
+## Cross-artifact sync — required for every spec change
+
+The design spec is canonical, but **four surfaces must agree** before the contract is implementable. This is the single largest maintenance risk in the repo today: drift between them silently breaks code-gen and confuses implementers, and one concept commonly fans out to 10+ edit sites.
+
+| Surface | File | Role |
+|---|---|---|
+| Design spec markdown | [`docs/superpowers/specs/2026-04-25-rf-site-planning-api-design.md`](docs/superpowers/specs/2026-04-25-rf-site-planning-api-design.md) | Source of truth — narrative + tables |
+| OpenAPI 3.1 | [`docs/superpowers/specs/2026-04-25-rf-site-planning-api.openapi.yaml`](docs/superpowers/specs/2026-04-25-rf-site-planning-api.openapi.yaml) | Endpoint contract + every entity schema |
+| JSON Schema 2020-12 | [`docs/superpowers/specs/2026-04-25-analysis-requests.schema.json`](docs/superpowers/specs/2026-04-25-analysis-requests.schema.json) | Op A–E request bodies |
+| Seed library / scenarios / test vectors | [`docs/superpowers/specs/seed/`](docs/superpowers/specs/seed/) | Bundled catalog + runnable fixtures + golden numerical vectors |
+
+**When you change a concept with a machine-readable representation, propagate the change across all four surfaces in the same commit.** Use this checklist:
+
+- **New catalog entity** — §3.2 entity table (bump count) · §3.x detail subsection · §3.6 reference graph · §2.5 endpoint inventory · spec change log · OpenAPI path family · OpenAPI component schema · OpenAPI page wrapper · JSON Schema `InlineX` def · `RefOrInlineX` def · any `AnalysisCommon` hook.
+- **New error / warning / filter code** — spec Appendix D · OpenAPI `ProblemDetail.code` (or `warnings.items.code`) enum · spec change log.
+- **New enum value** (`LinkType`, `SensitivityClass`, `LicenseClass`, `FidelityTier`, propagation/fading model, polarization, operation, run-status, asset purpose, output key) — spec narrative · OpenAPI enum · JSON Schema enum · `examples` lists.
+- **New pipeline stage or stage behavior** — §4.1 prose · §4.1 mermaid · Appendix A row if visible there.
+
+Before claiming a spec change is complete, re-run the structural validators:
+
+```bash
+python3 -c "import yaml; yaml.safe_load(open('docs/superpowers/specs/2026-04-25-rf-site-planning-api.openapi.yaml')); print('OpenAPI OK')"
+python3 -c "import json; json.load(open('docs/superpowers/specs/2026-04-25-analysis-requests.schema.json')); print('JSON Schema OK')"
+for f in docs/superpowers/specs/seed/scenarios/*.json docs/superpowers/specs/seed/test-vectors/*.json; do
+  python3 -c "import json; json.load(open('$f'))" && echo "OK: $f" || echo "BAD: $f"
+done
+```
+
+For numerical changes touching the link-budget / propagation / polarization formulas, also re-run the golden test vectors arithmetic check (Python snippet in [`seed/test-vectors/README.md`](docs/superpowers/specs/seed/test-vectors/README.md)).
+
+The same rule is duplicated in [CLAUDE.md](CLAUDE.md) for AI assistants. Treat the duplication as load-bearing — it lives in the README for humans browsing the repo and in CLAUDE.md so AI sessions pick it up automatically without needing to discover this README first.
+
 ## Spec navigation
 
 | Topic | Spec section |

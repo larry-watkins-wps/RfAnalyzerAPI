@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfanalyzer.local/schemas/analysis-requests.schema.json",
+  "title": "RF Site Planning API — Analysis Request Schemas (v2)",
+  "description": "JSON Schema for analysis request bodies (Op A–E). Companion to spec v2 (2026-04-25-rf-site-planning-api-design.md). Cross-cutting rules that this schema cannot express structurally — frequency authority (§4.0), per-pixel fidelity floors (§5.4), and exactly-one-rx-template-per-link-type for Op C (§4.0) — are enforced server-side and described in the relevant `description` fields.",
+
+  "oneOf": [
+    { "$ref": "#/$defs/RequestOpA_P2P" },
+    { "$ref": "#/$defs/RequestOpB_Area" },
+    { "$ref": "#/$defs/RequestOpC_MultiLink" },
+    { "$ref": "#/$defs/RequestOpD_MultiTx" },
+    { "$ref": "#/$defs/RequestOpE_Voxel" }
+  ],
+
+  "$defs": {
+
+    "Reference": {
+      "title": "Catalog reference",
+      "description": "Spec §2.3. Cross-key references not supported in v1.",
+      "type": "object",
+      "required": ["ref"],
+      "properties": {
+        "ref":     { "type": "string", "minLength": 1 },
+        "owner":   { "type": "string", "enum": ["self", "shared"], "default": "self" },
+        "version": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string",  "enum": ["latest"] }
+          ],
+          "default": "latest"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "AssetId": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Content-addressed asset identifier (§3.5)."
+    },
+
+    "AltitudeReference": { "type": "string", "enum": ["agl", "amsl"] },
+
+    "LatLon": {
+      "type": "object",
+      "required": ["lat", "lon"],
+      "properties": {
+        "lat": { "type": "number", "minimum": -90,  "maximum": 90 },
+        "lon": { "type": "number", "minimum": -180, "maximum": 180 }
+      },
+      "additionalProperties": false
+    },
+
+    "LatLonAlt": {
+      "type": "object",
+      "required": ["lat", "lon", "alt_m_agl"],
+      "properties": {
+        "lat":           { "type": "number", "minimum": -90,  "maximum": 90 },
+        "lon":           { "type": "number", "minimum": -180, "maximum": 180 },
+        "alt_m_agl":     { "type": "number" },
+        "alt_reference": { "$ref": "#/$defs/AltitudeReference", "default": "agl" }
+      },
+      "additionalProperties": false
+    },
+
+    "Bbox": {
+      "type": "object",
+      "required": ["south", "west", "north", "east"],
+      "properties": {
+        "south": { "type": "number", "minimum": -90,  "maximum": 90 },
+        "west":  { "type": "number", "minimum": -180, "maximum": 180 },
+        "north": { "type": "number", "minimum": -90,  "maximum": 90 },
+        "east":  { "type": "number", "minimum": -180, "maximum": 180 }
+      },
+      "additionalProperties": false
+    },
+
+    "Polygon": {
+      "type": "object",
+      "description": "GeoJSON Polygon, [lon, lat] order.",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": { "const": "Polygon" },
+        "coordinates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 4,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "items": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+
+    "Polarization":     { "type": "string", "enum": ["V", "H", "RHCP", "LHCP", "slant-45", "dual"] },
+    "LinkType":         { "type": "string", "enum": ["lora", "lte", "drone_c2", "drtk", "generic"] },
+    "FidelityTier":     { "type": "string", "enum": ["T0_FREE_SPACE", "T1_TERRAIN", "T2_TERRAIN_PLUS_CLUTTER", "T3_SURFACE", "T4_SURFACE_PLUS_BUILDINGS"] },
+    "PropagationModel": { "type": "string", "enum": ["auto", "p1812", "p526", "itm", "p528", "p530", "friis", "two_ray"], "default": "auto" },
+    "FadingModel":      { "type": "string", "enum": ["auto", "rayleigh", "rician", "lognormal"], "default": "auto" },
+    "Mode":             { "type": "string", "enum": ["sync", "async", "auto"], "default": "auto" },
+
+    "MinFidelityCoverage": {
+      "type": "object",
+      "required": ["tier", "fraction"],
+      "properties": {
+        "tier":     { "$ref": "#/$defs/FidelityTier" },
+        "fraction": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+
+    "ColorMap": {
+      "oneOf": [
+        { "type": "string", "description": "Named built-in colormap, e.g., viridis, signal_strength_default, lora_sf, lte_rsrp." },
+        {
+          "type": "object",
+          "required": ["stops"],
+          "properties": {
+            "stops": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "required": ["value", "rgba"],
+                "properties": {
+                  "value": { "type": "number" },
+                  "rgba":  {
+                    "type": "array",
+                    "minItems": 4, "maxItems": 4,
+                    "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "nodata": {
+              "type": "array",
+              "minItems": 4, "maxItems": 4,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "InlineRadioProfile": {
+      "type": "object",
+      "required": ["link_type", "freq_mhz", "bandwidth_khz", "tx_power_dbm", "rx_sensitivity_dbm"],
+      "properties": {
+        "name":                   { "type": "string" },
+        "link_type":              { "$ref": "#/$defs/LinkType" },
+        "freq_mhz":               { "type": "number", "exclusiveMinimum": 0 },
+        "bandwidth_khz":          { "type": "number", "exclusiveMinimum": 0 },
+        "tx_power_dbm":           { "type": "number" },
+        "rx_sensitivity_dbm":     { "type": "number" },
+        "spreading_factor":       { "type": "integer", "minimum": 7, "maximum": 12 },
+        "coding_rate":            { "type": "string" },
+        "band":                   { "type": "string" },
+        "earfcn":                 { "type": "integer" },
+        "mode_label":             { "type": "string" },
+        "modulation":             { "type": "string" },
+        "fade_margin_db_target":  { "type": "number" },
+        "propagation_model_pref": { "$ref": "#/$defs/PropagationModel" }
+      },
+      "additionalProperties": false
+    },
+
+    "InlineAntenna": {
+      "type": "object",
+      "required": ["kind", "gain_dbi", "polarization", "applicable_bands"],
+      "properties": {
+        "name":                     { "type": "string" },
+        "kind":                     { "type": "string", "enum": ["parametric", "pattern_file"] },
+        "gain_dbi":                 { "type": "number" },
+        "polarization":             { "$ref": "#/$defs/Polarization" },
+        "applicable_bands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["min_mhz", "max_mhz"],
+            "properties": {
+              "min_mhz": { "type": "number", "exclusiveMinimum": 0 },
+              "max_mhz": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "applicable_polarizations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Polarization" }
+        },
+        "pattern_type":             { "type": "string", "enum": ["omni", "sector"] },
+        "h_beamwidth_deg":          { "type": "number" },
+        "v_beamwidth_deg":          { "type": "number" },
+        "electrical_downtilt_deg":  { "type": "number" },
+        "format":                   { "type": "string", "enum": ["msi", "adf", "ant", "csv"] },
+        "pattern_asset_ref":        { "$ref": "#/$defs/AssetId" }
+      },
+      "additionalProperties": false
+    },
+
+    "InlineEquipmentProfile": {
+      "type": "object",
+      "description": "Equipment profile with `radio` and `antenna` each accepting either a Reference or an inlined object.",
+      "required": ["radio", "antenna", "mount_height_m_agl", "cable_loss_db"],
+      "properties": {
+        "name":                     { "type": "string" },
+        "radio": {
+          "oneOf": [
+            { "$ref": "#/$defs/Reference" },
+            { "$ref": "#/$defs/InlineRadioProfile" }
+          ]
+        },
+        "antenna": {
+          "oneOf": [
+            { "$ref": "#/$defs/Reference" },
+            { "$ref": "#/$defs/InlineAntenna" }
+          ]
+        },
+        "mount_height_m_agl":       { "type": "number", "minimum": 0 },
+        "cable_loss_db":            { "type": "number", "minimum": 0 },
+        "cable_loss_curve": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["freq_mhz", "loss_db"],
+            "properties": {
+              "freq_mhz": { "type": "number", "exclusiveMinimum": 0 },
+              "loss_db":  { "type": "number", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "azimuth_deg":              { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
+        "mechanical_downtilt_deg":  { "type": "number" },
+        "mfr":                      { "type": "string" },
+        "model":                    { "type": "string" },
+        "notes":                    { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "InlineSite": {
+      "type": "object",
+      "required": ["lat", "lon"],
+      "properties": {
+        "name":                          { "type": "string" },
+        "lat":                           { "type": "number", "minimum": -90,  "maximum": 90 },
+        "lon":                           { "type": "number", "minimum": -180, "maximum": 180 },
+        "ground_elevation_override_m":   { "type": "number" },
+        "default_equipment_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RefOrInlineEquipment" }
+        },
+        "notes":                         { "type": "string" },
+        "tags":                          { "type": "array", "items": { "type": "string" } },
+        "photo_asset_ref":               { "$ref": "#/$defs/AssetId" }
+      },
+      "additionalProperties": false
+    },
+
+    "InlineAOIPack": {
+      "type": "object",
+      "required": ["bbox"],
+      "properties": {
+        "name":                  { "type": "string" },
+        "bbox":                  { "$ref": "#/$defs/Bbox" },
+        "dtm_asset_ref":         { "$ref": "#/$defs/AssetId" },
+        "dsm_asset_ref":         { "$ref": "#/$defs/AssetId" },
+        "clutter_asset_ref":     { "$ref": "#/$defs/AssetId" },
+        "buildings_asset_ref":   { "$ref": "#/$defs/AssetId" },
+        "clutter_table_ref":     { "$ref": "#/$defs/Reference" },
+        "resolution_m":          { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+
+    "InlineMission": {
+      "type": "object",
+      "required": ["altitude_min_m_agl", "altitude_max_m_agl"],
+      "oneOf": [
+        { "required": ["bbox"] },
+        { "required": ["polygon"] }
+      ],
+      "properties": {
+        "name":                  { "type": "string" },
+        "bbox":                  { "$ref": "#/$defs/Bbox" },
+        "polygon":               { "$ref": "#/$defs/Polygon" },
+        "altitude_min_m_agl":    { "type": "number", "minimum": 0 },
+        "altitude_max_m_agl":    { "type": "number", "minimum": 0 },
+        "altitude_step_m":       { "type": "number", "exclusiveMinimum": 0 },
+        "duration_estimate_min": { "type": "number" },
+        "dock_site_ref":         { "$ref": "#/$defs/Reference" }
+      },
+      "additionalProperties": false
+    },
+
+    "RefOrInlineSite": {
+      "description": "Site reference, inline Site, or bare {lat, lon} coordinate.",
+      "oneOf": [
+        { "$ref": "#/$defs/Reference" },
+        { "$ref": "#/$defs/InlineSite" },
+        { "$ref": "#/$defs/LatLon" }
+      ]
+    },
+
+    "RefOrInlineEquipment": {
+      "oneOf": [
+        { "$ref": "#/$defs/Reference" },
+        { "$ref": "#/$defs/InlineEquipmentProfile" }
+      ]
+    },
+
+    "RefOrInlineAOI": {
+      "oneOf": [
+        { "$ref": "#/$defs/Reference" },
+        { "$ref": "#/$defs/InlineAOIPack" }
+      ]
+    },
+
+    "RefOrInlineMission": {
+      "oneOf": [
+        { "$ref": "#/$defs/Reference" },
+        { "$ref": "#/$defs/InlineMission" }
+      ]
+    },
+
+    "OutputKey": {
+      "type": "string",
+      "enum": [
+        "link_budget", "path_profile", "geotiff", "geotiff_stack", "voxel",
+        "geojson_contours", "kmz", "png_with_worldfile", "rendered_cross_section",
+        "stats", "best_server_raster", "fidelity_tier_raster", "point_query",
+        "lora_snr_margin", "lora_best_sf", "lora_link_metrics",
+        "lte_rsrp", "lte_rsrq", "lte_sinr", "lte_mcs_feasibility",
+        "c2_pass_fail", "c2_range_envelope",
+        "drtk_pass_fail", "drtk_range_envelope"
+      ]
+    },
+
+    "AnalysisCommon": {
+      "type": "object",
+      "description": "Fields shared by every analysis request body. Spec §2.3 (mode, idempotency, dedupe, webhook), §5.4 (fidelity floors), §6 (outputs, color_map, contour_levels_db), §7.3 (measurement_set_refs, freq_tolerance_mhz).",
+      "properties": {
+        "outputs":                { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/OutputKey" } },
+        "mode":                   { "$ref": "#/$defs/Mode" },
+        "propagation_model":      { "$ref": "#/$defs/PropagationModel" },
+        "fading_model":           { "$ref": "#/$defs/FadingModel" },
+        "fading_params":          { "type": "object" },
+        "min_fidelity_tier":      { "$ref": "#/$defs/FidelityTier" },
+        "min_fidelity_coverage":  { "$ref": "#/$defs/MinFidelityCoverage" },
+        "color_map":              { "$ref": "#/$defs/ColorMap" },
+        "contour_levels_db":      { "type": "array", "items": { "type": "number" } },
+        "output_crs":             { "type": "string", "description": "EPSG code (e.g., 'EPSG:4326') or PROJ string." },
+        "voxel_lossless":         { "type": "boolean", "default": false, "description": "Op E only; ignored elsewhere." },
+        "measurement_set_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Reference" }
+        },
+        "freq_tolerance_mhz":     { "type": "number", "exclusiveMinimum": 0 },
+        "dedupe":                 { "type": "boolean", "default": false },
+        "webhook_url":            { "type": "string", "format": "uri" },
+        "point_query_locations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LatLonAlt" }
+        }
+      }
+    },
+
+    "TxSiteEntry": {
+      "type": "object",
+      "required": ["site", "equipment"],
+      "properties": {
+        "site":      { "$ref": "#/$defs/RefOrInlineSite" },
+        "equipment": { "$ref": "#/$defs/RefOrInlineEquipment" }
+      },
+      "additionalProperties": false
+    },
+
+    "RxTemplateEntry": {
+      "type": "object",
+      "required": ["link_type", "equipment"],
+      "properties": {
+        "link_type": { "$ref": "#/$defs/LinkType" },
+        "equipment": { "$ref": "#/$defs/RefOrInlineEquipment" }
+      },
+      "additionalProperties": false
+    },
+
+    "RequestOpA_P2P": {
+      "title": "Op A — Point-to-point",
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/AnalysisCommon" }],
+      "required": ["operation", "tx_site", "tx_equipment", "rx_site", "rx_equipment", "outputs"],
+      "properties": {
+        "operation":    { "const": "p2p" },
+        "tx_site":      { "$ref": "#/$defs/RefOrInlineSite" },
+        "tx_equipment": { "$ref": "#/$defs/RefOrInlineEquipment" },
+        "rx_site":      { "$ref": "#/$defs/RefOrInlineSite" },
+        "rx_equipment": { "$ref": "#/$defs/RefOrInlineEquipment" },
+        "aoi":          { "$ref": "#/$defs/RefOrInlineAOI" },
+        "outputs": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "enum": ["link_budget", "path_profile", "rendered_cross_section", "point_query"] }
+        }
+      }
+    },
+
+    "RequestOpB_Area": {
+      "title": "Op B — Area heatmap",
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/AnalysisCommon" }],
+      "required": ["operation", "tx_site", "tx_equipment", "rx_template", "aoi", "resolution_m", "outputs"],
+      "properties": {
+        "operation":                 { "const": "area" },
+        "tx_site":                   { "$ref": "#/$defs/RefOrInlineSite" },
+        "tx_equipment":              { "$ref": "#/$defs/RefOrInlineEquipment" },
+        "rx_template":               { "$ref": "#/$defs/RefOrInlineEquipment" },
+        "rx_altitude_override_m_agl":{ "type": "number" },
+        "aoi":                       { "$ref": "#/$defs/RefOrInlineAOI" },
+        "resolution_m":              { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "RequestOpC_MultiLink": {
+      "title": "Op C — Multi-link site report",
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/AnalysisCommon" }],
+      "required": ["operation", "tx_site", "rx_templates", "aoi", "resolution_m", "outputs"],
+      "properties": {
+        "operation":         { "const": "multi_link" },
+        "tx_site":           { "$ref": "#/$defs/RefOrInlineSite" },
+        "tx_equipment_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RefOrInlineEquipment" },
+          "description": "If omitted, defaults to the resolved tx_site's `default_equipment_refs[]`."
+        },
+        "rx_templates": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/RxTemplateEntry" },
+          "description": "Exactly one entry per distinct link_type present in the resolved Tx set; spec §4.0. Server returns OP_C_RX_TEMPLATE_MISSING if a Tx has no matching template."
+        },
+        "aoi":               { "$ref": "#/$defs/RefOrInlineAOI" },
+        "resolution_m":      { "type": "number", "exclusiveMinimum": 0 },
+        "combined_site_score": {
+          "type": "object",
+          "properties": {
+            "weights_per_link_type": {
+              "type": "object",
+              "additionalProperties": { "type": "number", "minimum": 0 },
+              "description": "Map link_type → weight. Missing keys default to 1."
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+
+    "RequestOpD_MultiTx": {
+      "title": "Op D — Multi-Tx best-server",
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/AnalysisCommon" }],
+      "required": ["operation", "tx_sites", "rx_template", "aoi", "resolution_m", "outputs"],
+      "properties": {
+        "operation":    { "const": "multi_tx" },
+        "tx_sites": {
+          "type": "array", "minItems": 2,
+          "items": { "$ref": "#/$defs/TxSiteEntry" },
+          "description": "Tx_site index in this array is the value used in best_server_raster (1-indexed; 0 = NoData)."
+        },
+        "rx_template":  { "$ref": "#/$defs/RefOrInlineEquipment" },
+        "aoi":          { "$ref": "#/$defs/RefOrInlineAOI" },
+        "resolution_m": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "RequestOpE_Voxel": {
+      "title": "Op E — 3D / volumetric coverage",
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/AnalysisCommon" }],
+      "required": ["operation", "tx_sites", "rx_template", "outputs"],
+      "oneOf": [
+        { "required": ["mission"] },
+        { "required": ["aoi", "alt_step_m"] }
+      ],
+      "properties": {
+        "operation":   { "const": "voxel" },
+        "tx_sites": {
+          "type": "array", "minItems": 1,
+          "items": { "$ref": "#/$defs/TxSiteEntry" }
+        },
+        "rx_template": { "$ref": "#/$defs/RefOrInlineEquipment" },
+        "mission":     { "$ref": "#/$defs/RefOrInlineMission" },
+        "aoi":         { "$ref": "#/$defs/RefOrInlineAOI" },
+        "resolution_m":{ "type": "number", "exclusiveMinimum": 0 },
+        "alt_step_m":  { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

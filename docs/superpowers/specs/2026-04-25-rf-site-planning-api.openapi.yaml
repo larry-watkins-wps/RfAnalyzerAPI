@@ -1,0 +1,1313 @@
+openapi: 3.1.0
+
+info:
+  title: RF Site Planning API
+  version: 0.2.0-draft
+  summary: Self-hosted, single-tenant RF propagation analysis for site planning.
+  description: |
+    Companion contract to design spec v2 (2026-04-25-rf-site-planning-api-design.md).
+
+    - Auth: API key in `X-Api-Key` header (§2.3).
+    - Sharing: per-tenant `private` / `shared` flag, no cross-key references.
+    - Run lifecycle: SUBMITTED → QUEUED → RUNNING → COMPLETED|PARTIAL|FAILED|CANCELLED|EXPIRED (§8.1).
+    - Storage: per-class TTLs (§8.2). Canonical artifacts persist to TTL; derivatives are 24 h cache.
+    - Mode selection: `auto` selects async for area/multi_link/multi_tx/voxel ops or large geometries; sync responses bounded by `sync_budget_seconds` and auto-promote to async (HTTP 202) on overrun.
+    - Errors and warnings codes are enumerated in spec Appendix D and reproduced in `ProblemDetail.code` and `ProblemDetail.warnings[].code`.
+
+servers:
+  - url: https://{host}/v1
+    variables:
+      host:
+        default: rf.local
+        description: Deployment hostname.
+
+security:
+  - ApiKey: []
+
+tags:
+  - { name: catalog,      description: Named, versioned, sharable catalog entities. }
+  - { name: assets,       description: Content-addressed binary blob upload/download (§3.5). }
+  - { name: analyses,     description: Analysis submission endpoints (§4, §6). }
+  - { name: runs,         description: Run lifecycle, artifacts, replay, slicing (§8.1, §8.9). }
+  - { name: measurements, description: Field measurement ingest (§7). }
+  - { name: webhooks,     description: Async run notifications (§2.4). }
+  - { name: ops,          description: Health, readiness, metrics. }
+
+paths:
+
+  # ── Sites ────────────────────────────────────────────────────────────
+  /sites:
+    get:
+      tags: [catalog]
+      operationId: listSites
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/FilterName' }
+        - { $ref: '#/components/parameters/FilterTag' }
+        - { $ref: '#/components/parameters/FilterShare' }
+      responses:
+        '200': { $ref: '#/components/responses/PageOfSites' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    post:
+      tags: [catalog]
+      operationId: createSite
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
+      responses:
+        '201': { description: Created.,         content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /sites/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:
+      tags: [catalog]
+      operationId: getSite
+      responses:
+        '200': { description: Site., content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [catalog]
+      operationId: updateSite
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
+      responses: { '200': { description: Updated. }, '404': { $ref: '#/components/responses/NotFound' } }
+    delete:
+      tags: [catalog]
+      operationId: deleteSite
+      responses: { '204': { description: Soft-deleted. }, '404': { $ref: '#/components/responses/NotFound' } }
+
+  # ── Antennas ─────────────────────────────────────────────────────────
+  /antennas:
+    get:
+      tags: [catalog]
+      operationId: listAntennas
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/FilterName' }
+        - { $ref: '#/components/parameters/FilterShare' }
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfAntennas' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createAntenna
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }
+      responses: { '201': { description: Created. }, '400': { $ref: '#/components/responses/BadRequest' } }
+  /antennas/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getAntenna,    responses: { '200': { description: Antenna., content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+    patch:  { tags: [catalog], operationId: updateAntenna, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }, responses: { '200': { description: Updated. }, '404': { $ref: '#/components/responses/NotFound' } } }
+    delete: { tags: [catalog], operationId: deleteAntenna, responses: { '204': { description: Soft-deleted. }, '404': { $ref: '#/components/responses/NotFound' } } }
+
+  # ── Radio Profiles ───────────────────────────────────────────────────
+  /radio-profiles:
+    get:
+      tags: [catalog]
+      operationId: listRadioProfiles
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfRadioProfiles' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createRadioProfile
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } }
+      responses: { '201': { description: Created. } }
+  /radio-profiles/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getRadioProfile,    responses: { '200': { description: RadioProfile., content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } } } }
+    patch:  { tags: [catalog], operationId: updateRadioProfile, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteRadioProfile, responses: { '204': { description: Soft-deleted. } } }
+
+  # ── Equipment Profiles ───────────────────────────────────────────────
+  /equipment-profiles:
+    get:
+      tags: [catalog]
+      operationId: listEquipmentProfiles
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }, { $ref: '#/components/parameters/FilterShare' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfEquipmentProfiles' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createEquipmentProfile
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } }
+      responses: { '201': { description: Created. } }
+  /equipment-profiles/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getEquipmentProfile,    responses: { '200': { description: EquipmentProfile., content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } } } }
+    patch:  { tags: [catalog], operationId: updateEquipmentProfile, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteEquipmentProfile, responses: { '204': { description: Soft-deleted. } } }
+
+  # ── AOI Packs ────────────────────────────────────────────────────────
+  /aoi-packs:
+    get:
+      tags: [catalog]
+      operationId: listAOIPacks
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }, { $ref: '#/components/parameters/FilterShare' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfAOIPacks' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createAOIPack
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } }
+      responses:
+        '201': { description: Created.,                         content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } }
+        '207': { description: Created with FETCHED_LAYER_PARTIAL warnings., content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /aoi-packs/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getAOIPack,    responses: { '200': { description: AOIPack., content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } } } }
+    patch:
+      tags: [catalog]
+      operationId: updateAOIPack
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } }
+      responses: { '200': { description: Updated (e.g., to retry a failed fetched layer). } }
+    delete: { tags: [catalog], operationId: deleteAOIPack, responses: { '204': { description: Soft-deleted. } } }
+
+  # ── Clutter Tables ───────────────────────────────────────────────────
+  /clutter-tables:
+    get:
+      tags: [catalog]
+      operationId: listClutterTables
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfClutterTables' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createClutterTable
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } }
+      responses: { '201': { description: Created. } }
+  /clutter-tables/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getClutterTable,    responses: { '200': { description: ClutterTable., content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } } } }
+    patch:  { tags: [catalog], operationId: updateClutterTable, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteClutterTable, responses: { '204': { description: Soft-deleted. } } }
+
+  # ── Missions ─────────────────────────────────────────────────────────
+  /missions:
+    get:
+      tags: [catalog]
+      operationId: listMissions
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }, { $ref: '#/components/parameters/FilterShare' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfMissions' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createMission
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Mission' } } } }
+      responses: { '201': { description: Created. } }
+  /missions/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getMission,    responses: { '200': { description: Mission., content: { application/json: { schema: { $ref: '#/components/schemas/Mission' } } } } } }
+    patch:  { tags: [catalog], operationId: updateMission, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Mission' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteMission, responses: { '204': { description: Soft-deleted. } } }
+
+  # ── Comparisons ──────────────────────────────────────────────────────
+  /comparisons:
+    get:
+      tags: [catalog]
+      operationId: listComparisons
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfComparisons' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createComparison
+      description: Creating a Comparison auto-pins all referenced runs (subject to `max_pinned_runs`).
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } }
+      responses:
+        '201': { description: Created. }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /comparisons/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getComparison,    responses: { '200': { description: Comparison., content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } } } }
+    patch:  { tags: [catalog], operationId: updateComparison, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteComparison, responses: { '204': { description: Soft-deleted; runs unpinned unless pinned by other Comparisons or directly. } } }
+
+  # ── Measurements ─────────────────────────────────────────────────────
+  /measurements:
+    get:
+      tags: [measurements]
+      operationId: listMeasurements
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfMeasurementSets' } } } } }
+    post:
+      tags: [measurements]
+      operationId: createMeasurementSet
+      description: |
+        Inline JSON body or multipart CSV/GeoJSON upload up to 50 MB.
+        Larger sets must be uploaded via the asset model (purpose=`measurement_csv`) and referenced by `csv_asset_ref`.
+      requestBody:
+        required: true
+        content:
+          application/json:    { schema: { $ref: '#/components/schemas/MeasurementSet' } }
+          multipart/form-data: { schema: { type: object, properties: { metadata: { $ref: '#/components/schemas/MeasurementSet' }, file: { type: string, format: binary } } } }
+      responses:
+        '201': { description: Created. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /measurements/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [measurements], operationId: getMeasurementSet,    responses: { '200': { description: MeasurementSet., content: { application/json: { schema: { $ref: '#/components/schemas/MeasurementSet' } } } } } }
+    patch:  { tags: [measurements], operationId: updateMeasurementSet, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MeasurementSet' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [measurements], operationId: deleteMeasurementSet, responses: { '204': { description: Soft-deleted. } } }
+  /measurements/{id}:append:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    post:
+      tags: [measurements]
+      operationId: appendMeasurements
+      description: Chunked append for ongoing telemetry. Creates a new Measurement Set version (light copy-on-write); point-level dedup by (lat, lon, alt_m_agl, freq_mhz, timestamp).
+      parameters:
+        - in: header, name: Idempotency-Key, required: true, schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MeasurementPoint' } } }
+          text/csv:         { schema: { type: string } }
+      responses:
+        '200': { description: Appended; new version., content: { application/json: { schema: { $ref: '#/components/schemas/MeasurementSet' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  # ── Assets ───────────────────────────────────────────────────────────
+  /assets:initiate:
+    post:
+      tags: [assets]
+      operationId: initiateAssetUpload
+      description: |
+        Begin a content-addressed upload (§3.5). Returns a session document — direct PUT,
+        multipart with per-part presigned URLs, or `already_exists: true` (no upload required)
+        if an asset with the same SHA-256 is already in the store.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AssetInitiateRequest' } } } }
+      responses:
+        '200': { description: Session., content: { application/json: { schema: { $ref: '#/components/schemas/AssetSession' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /assets/{id}:complete:
+    parameters: [{ in: path, name: id, required: true, schema: { $ref: '#/components/schemas/AssetId' } }]
+    post:
+      tags: [assets]
+      operationId: completeAssetUpload
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/AssetCompleteRequest' } } } }
+      responses:
+        '200': { description: Asset finalized., content: { application/json: { schema: { $ref: '#/components/schemas/Asset' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /assets/{id}:abort:
+    parameters: [{ in: path, name: id, required: true, schema: { $ref: '#/components/schemas/AssetId' } }]
+    post:
+      tags: [assets]
+      operationId: abortAssetUpload
+      responses: { '204': { description: Aborted; uploaded parts reclaimed. } }
+  /assets/{id}:
+    parameters: [{ in: path, name: id, required: true, schema: { $ref: '#/components/schemas/AssetId' } }]
+    get:
+      tags: [assets]
+      operationId: getAssetMetadata
+      responses:
+        '200': { description: Asset metadata., content: { application/json: { schema: { $ref: '#/components/schemas/Asset' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Analyses ─────────────────────────────────────────────────────────
+  /analyses/p2p:
+    post:
+      tags: [analyses]
+      operationId: submitOpA
+      summary: Op A — point-to-point.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpA_P2P' } } } }
+      responses:
+        '200': { description: Sync run completed.,                  content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '202': { description: Async (or auto-promoted to async).,   content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /analyses/area:
+    post:
+      tags: [analyses]
+      operationId: submitOpB
+      summary: Op B — area heatmap.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpB_Area' } } } }
+      responses:
+        '200': { description: Sync (small geometries only).,        content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '202': { description: Async.,                               content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /analyses/multi_link:
+    post:
+      tags: [analyses]
+      operationId: submitOpC
+      summary: Op C — multi-link site report.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpC_MultiLink' } } } }
+      responses:
+        '200': { description: Sync.,  content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '202': { description: Async., content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /analyses/multi_tx:
+    post:
+      tags: [analyses]
+      operationId: submitOpD
+      summary: Op D — multi-Tx best-server.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpD_MultiTx' } } } }
+      responses:
+        '200': { description: Sync.,  content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '202': { description: Async., content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /analyses/voxel:
+    post:
+      tags: [analyses]
+      operationId: submitOpE
+      summary: Op E — 3D / volumetric coverage.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpE_Voxel' } } } }
+      responses:
+        '202': { description: Async (default for Op E)., content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  # ── Runs ─────────────────────────────────────────────────────────────
+  /runs/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:
+      tags: [runs]
+      operationId: getRun
+      responses: { '200': { description: Run record., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+    delete:
+      tags: [runs]
+      operationId: cancelRun
+      description: Cancellation is honored at next stage/sub-stage boundary (§8.1; bounded by `cancellation_check_seconds`).
+      responses: { '202': { description: Cancellation accepted. }, '404': { $ref: '#/components/responses/NotFound' } }
+  /runs/{id}/status:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:
+      tags: [runs]
+      operationId: getRunStatus
+      responses: { '200': { description: Status with stage progress hints., content: { application/json: { schema: { $ref: '#/components/schemas/RunStatus' } } } } }
+  /runs/{id}/replay:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    post:
+      tags: [runs]
+      operationId: replayRun
+      description: Resubmits the original run against the engine major recorded on it. Cross-major requires `force_replay_across_major: true`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force_replay_across_major: { type: boolean, default: false }
+                mode: { type: string, enum: [sync, async, auto] }
+      responses:
+        '200': { description: Sync replay completed., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '202': { description: Async replay accepted., content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /runs/{id}/pin:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    post:
+      tags: [runs]
+      operationId: pinRun
+      responses: { '200': { description: Pinned., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }, '429': { $ref: '#/components/responses/RateLimited' } }
+  /runs/{id}/unpin:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    post:
+      tags: [runs]
+      operationId: unpinRun
+      responses: { '200': { description: Unpinned., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } } }
+  /runs/{id}/artifacts/{key}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }, { $ref: '#/components/parameters/ArtifactKey' }]
+    get:
+      tags: [runs]
+      operationId: getArtifactMetadata
+      responses: { '200': { description: Artifact reference., content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactRef' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+  /runs/{id}/artifacts/{key}/url:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }, { $ref: '#/components/parameters/ArtifactKey' }]
+    get:
+      tags: [runs]
+      operationId: refreshArtifactUrl
+      description: Returns a fresh 15-minute presigned download URL.
+      responses:
+        '200':
+          description: Fresh URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [download_url, expires_at]
+                properties:
+                  download_url: { type: string, format: uri }
+                  expires_at:   { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /runs/{id}/artifacts/{key}:materialize:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }, { $ref: '#/components/parameters/ArtifactKey' }]
+    post:
+      tags: [runs]
+      operationId: materializeArtifact
+      description: Materializes a not-yet-built artifact (e.g., a derivative requested after submission) from the persisted canonicals.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parameters: { type: object, description: 'Artifact-specific knobs (color_map, contour_levels_db, output_crs, …).' }
+      responses:
+        '200': { description: Materialized., content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactRef' } } } }
+  /runs/{id}/artifacts:rederive:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    post:
+      tags: [runs]
+      operationId: rederiveArtifact
+      description: Produces a derivative variant from a persisted canonical without re-running propagation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: { type: string, enum: [geotiff, voxel, path_profile, best_server_raster] }
+                to:   { type: string, enum: [kmz, png_with_worldfile, geojson_contours, rendered_cross_section, geotiff_stack, geotiff] }
+                parameters: { type: object }
+      responses:
+        '200':
+          description: Variant produced (cached 24 h).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artifact, cached_until]
+                properties:
+                  artifact:    { $ref: '#/components/schemas/ArtifactRef' }
+                  cached_until:{ type: string, format: date-time }
+  /runs/{id}/artifacts/voxel/slice:
+    parameters:
+      - { $ref: '#/components/parameters/EntityId' }
+      - { in: query, name: bbox,      schema: { type: string, description: 's,w,n,e' } }
+      - { in: query, name: altitudes, schema: { type: string, description: 'comma-separated discrete altitudes, m AGL' } }
+      - { in: query, name: alt_min,   schema: { type: number } }
+      - { in: query, name: alt_max,   schema: { type: number } }
+      - { in: query, name: alt_step,  schema: { type: number } }
+      - { in: query, name: format,    required: true, schema: { type: string, enum: [geotiff, geotiff_stack, voxel_subset, json_point_grid] } }
+      - { in: query, name: color_map, schema: { type: string } }
+    get:
+      tags: [runs]
+      operationId: sliceVoxel
+      description: Server-side slice of a voxel artifact. Falls back to `geotiff_stack` if `voxel` not produced.
+      responses:
+        '200': { description: Slice artifact reference., content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactRef' } } } }
+        '404': { description: VOXEL_NOT_AVAILABLE., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+
+  # ── Webhooks ─────────────────────────────────────────────────────────
+  /webhooks:
+    get:
+      tags: [webhooks]
+      operationId: listWebhooks
+      responses: { '200': { description: Webhooks., content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Webhook' } } } } } }
+    post:
+      tags: [webhooks]
+      operationId: createWebhook
+      description: Triggers a registration challenge POST to the URL; the URL must echo back the challenge within 5 s.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookCreate' } } } }
+      responses:
+        '201': { description: Created and verified., content: { application/json: { schema: { $ref: '#/components/schemas/Webhook' } } } }
+        '422': { description: Challenge failed., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+  /webhooks/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [webhooks], operationId: getWebhook,    responses: { '200': { description: Webhook., content: { application/json: { schema: { $ref: '#/components/schemas/Webhook' } } } } } }
+    delete: { tags: [webhooks], operationId: deleteWebhook, responses: { '204': { description: Deleted. } } }
+  /webhooks/secrets:rotate:
+    post:
+      tags: [webhooks]
+      operationId: rotateWebhookSecret
+      description: Issues a new HMAC secret. Old secret remains valid for 24 h to allow receiver rollover.
+      responses:
+        '200':
+          description: New secret with grace window.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, old_secret_valid_until]
+                properties:
+                  secret:                 { type: string }
+                  old_secret_valid_until: { type: string, format: date-time }
+
+  # ── Ops ──────────────────────────────────────────────────────────────
+  /healthz:
+    get:
+      tags: [ops]
+      operationId: healthz
+      security: []
+      responses: { '200': { description: Process alive. } }
+  /readyz:
+    get:
+      tags: [ops]
+      operationId: readyz
+      security: []
+      responses:
+        '200': { description: Ready (all dependencies reachable). }
+        '503': { description: Not ready., content: { application/json: { schema: { type: object, properties: { db: { type: boolean }, queue: { type: boolean }, artifact_store: { type: boolean }, geo_data: { type: boolean } } } } } }
+  /metrics:
+    get:
+      tags: [ops]
+      operationId: metrics
+      security: []
+      responses:
+        '200':
+          description: Prometheus exposition.
+          content:
+            'text/plain; version=0.0.4': { schema: { type: string } }
+
+
+components:
+
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in:   header
+      name: X-Api-Key
+
+  parameters:
+    Cursor:        { in: query,  name: cursor,           schema: { type: string } }
+    Limit:         { in: query,  name: limit,            schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    FilterName:    { in: query,  name: name,             schema: { type: string } }
+    FilterTag:     { in: query,  name: tag,              schema: { type: string } }
+    FilterShare:   { in: query,  name: share,            schema: { type: string, enum: [private, shared, all], default: all } }
+    EntityId:      { in: path,   name: id,    required: true, schema: { type: string } }
+    ArtifactKey:   { in: path,   name: key,   required: true, schema: { type: string } }
+    IdempotencyKey:{ in: header, name: Idempotency-Key,  schema: { type: string } }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } }
+    BadRequest:
+      description: Validation failure (schema-level).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } }
+    NotFound:
+      description: Not found.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } }
+    Unprocessable:
+      description: |
+        Schema-valid but semantically invalid: RX_TX_FREQ_MISMATCH,
+        OP_C_RX_TEMPLATE_MISSING, ANTENNA_OUT_OF_BAND, FIDELITY_FLOOR_NOT_MET,
+        IDEMPOTENCY_KEY_BODY_MISMATCH, AOI_OUT_OF_BBOX, etc.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } }
+    RateLimited:
+      description: Rate limit, storage quota, or pin cap exceeded.
+      headers: { Retry-After: { schema: { type: string } } }
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } }
+    PageOfSites:
+      description: Page of sites.
+      content: { application/json: { schema: { $ref: '#/components/schemas/PageOfSites' } } }
+
+  schemas:
+
+    # ── Shared ────────────────────────────────────────────────────────
+    ProblemDetail:
+      type: object
+      required: [title, status, code]
+      properties:
+        type:     { type: string, format: uri }
+        title:    { type: string }
+        status:   { type: integer }
+        detail:   { type: string }
+        instance: { type: string }
+        code:
+          type: string
+          description: Machine-readable code (Appendix D).
+          enum:
+            - RX_TX_FREQ_MISMATCH
+            - ANTENNA_OUT_OF_BAND
+            - OP_C_RX_TEMPLATE_MISSING
+            - FIDELITY_FLOOR_NOT_MET
+            - PINNED_MODEL_OUT_OF_RANGE
+            - PINNED_MODEL_DATA_TIER_INSUFFICIENT
+            - IDEMPOTENCY_KEY_BODY_MISMATCH
+            - LAYER_GONE
+            - STORAGE_QUOTA_EXCEEDED
+            - PINNED_RUN_CAP_EXCEEDED
+            - AOI_OUT_OF_BBOX
+            - BYO_LAYER_VALIDATION_FAILED
+            - VOXEL_NOT_AVAILABLE
+            - REPLAY_ACROSS_ENGINE_MAJOR
+        warnings:
+          type: array
+          items:
+            type: object
+            required: [code]
+            properties:
+              code:
+                type: string
+                enum:
+                  - FIDELITY_DEGRADED
+                  - MODEL_OUT_OF_NOMINAL_FREQ
+                  - CLUTTER_TABLE_TAXONOMY_FALLBACK
+                  - POLARIZATION_DEFAULTED
+                  - DSM_GAP
+                  - FETCHED_LAYER_PARTIAL
+                  - RESOLUTION_EXCEEDS_DATA
+              detail: { type: string }
+
+    Page:
+      type: object
+      properties:
+        next_cursor:    { type: [string, "null"] }
+        total_estimate: { type: [integer, "null"] }
+
+    Reference:
+      type: object
+      required: [ref]
+      properties:
+        ref:     { type: string, minLength: 1 }
+        owner:   { type: string, enum: [self, shared], default: self }
+        version:
+          oneOf:
+            - { type: integer, minimum: 1 }
+            - { type: string, enum: [latest] }
+
+    AssetId:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
+
+    LatLon:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number, minimum: -90,  maximum: 90 }
+        lon: { type: number, minimum: -180, maximum: 180 }
+
+    LatLonAlt:
+      type: object
+      required: [lat, lon, alt_m_agl]
+      properties:
+        lat: { type: number, minimum: -90,  maximum: 90 }
+        lon: { type: number, minimum: -180, maximum: 180 }
+        alt_m_agl:     { type: number }
+        alt_reference: { type: string, enum: [agl, amsl], default: agl }
+
+    Bbox:
+      type: object
+      required: [south, west, north, east]
+      properties:
+        south: { type: number, minimum: -90,  maximum: 90 }
+        west:  { type: number, minimum: -180, maximum: 180 }
+        north: { type: number, minimum: -90,  maximum: 90 }
+        east:  { type: number, minimum: -180, maximum: 180 }
+
+    Polygon:
+      type: object
+      required: [type, coordinates]
+      properties:
+        type: { const: Polygon }
+        coordinates:
+          type: array
+          minItems: 1
+          items:
+            type: array
+            minItems: 4
+            items:
+              type: array
+              minItems: 2
+              maxItems: 3
+              items: { type: number }
+
+    Polarization: { type: string, enum: [V, H, RHCP, LHCP, slant-45, dual] }
+    LinkType:     { type: string, enum: [lora, lte, drone_c2, drtk, generic] }
+    FidelityTier: { type: string, enum: [T0_FREE_SPACE, T1_TERRAIN, T2_TERRAIN_PLUS_CLUTTER, T3_SURFACE, T4_SURFACE_PLUS_BUILDINGS] }
+    Mode:         { type: string, enum: [sync, async, auto], default: auto }
+    PropagationModel: { type: string, enum: [auto, p1812, p526, itm, p528, p530, friis, two_ray], default: auto }
+    FadingModel:  { type: string, enum: [auto, rayleigh, rician, lognormal], default: auto }
+
+    # ── Catalog entities ──────────────────────────────────────────────
+    Site:
+      type: object
+      required: [name, lat, lon]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        lat: { type: number, minimum: -90,  maximum: 90 }
+        lon: { type: number, minimum: -180, maximum: 180 }
+        ground_elevation_override_m: { type: number }
+        default_equipment_refs: { type: array, items: { $ref: '#/components/schemas/Reference' } }
+        notes: { type: string }
+        tags:  { type: array, items: { type: string } }
+        photo_asset_ref: { $ref: '#/components/schemas/AssetId' }
+
+    Antenna:
+      type: object
+      required: [name, kind, gain_dbi, polarization, applicable_bands]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        kind:    { type: string, enum: [parametric, pattern_file] }
+        gain_dbi: { type: number }
+        polarization: { $ref: '#/components/schemas/Polarization' }
+        applicable_bands:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [min_mhz, max_mhz]
+            properties:
+              min_mhz: { type: number, exclusiveMinimum: 0 }
+              max_mhz: { type: number, exclusiveMinimum: 0 }
+        applicable_polarizations: { type: array, items: { $ref: '#/components/schemas/Polarization' } }
+        pattern_type: { type: string, enum: [omni, sector] }
+        h_beamwidth_deg: { type: number }
+        v_beamwidth_deg: { type: number }
+        electrical_downtilt_deg: { type: number }
+        format: { type: string, enum: [msi, adf, ant, csv] }
+        pattern_asset_ref: { $ref: '#/components/schemas/AssetId' }
+
+    RadioProfile:
+      type: object
+      required: [name, link_type, freq_mhz, bandwidth_khz, tx_power_dbm, rx_sensitivity_dbm]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        link_type: { $ref: '#/components/schemas/LinkType' }
+        freq_mhz: { type: number, exclusiveMinimum: 0 }
+        bandwidth_khz: { type: number, exclusiveMinimum: 0 }
+        tx_power_dbm: { type: number }
+        rx_sensitivity_dbm: { type: number }
+        spreading_factor: { type: integer, minimum: 7, maximum: 12 }
+        coding_rate: { type: string }
+        band:        { type: string }
+        earfcn:      { type: integer }
+        mode_label:  { type: string }
+        modulation:  { type: string }
+        fade_margin_db_target: { type: number }
+        propagation_model_pref: { $ref: '#/components/schemas/PropagationModel' }
+
+    EquipmentProfile:
+      type: object
+      required: [name, radio_ref, antenna_ref, mount_height_m_agl, cable_loss_db]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        radio_ref:   { $ref: '#/components/schemas/Reference' }
+        antenna_ref: { $ref: '#/components/schemas/Reference' }
+        mount_height_m_agl: { type: number, minimum: 0 }
+        cable_loss_db: { type: number, minimum: 0 }
+        cable_loss_curve:
+          type: array
+          items:
+            type: object
+            required: [freq_mhz, loss_db]
+            properties:
+              freq_mhz: { type: number, exclusiveMinimum: 0 }
+              loss_db:  { type: number, minimum: 0 }
+        azimuth_deg: { type: number, minimum: 0, exclusiveMaximum: 360 }
+        mechanical_downtilt_deg: { type: number }
+        mfr:   { type: string }
+        model: { type: string }
+        notes: { type: string }
+
+    AOILayer:
+      type: object
+      properties:
+        source: { type: string, enum: [bundled, byo, fetched] }
+        asset_ref: { $ref: '#/components/schemas/AssetId' }
+        upstream_source: { type: string }
+        upstream_version: { type: string }
+        acquired_at:   { type: string, format: date-time }
+        content_sha256: { type: string }
+        resolution_m: { type: number }
+
+    AOIPack:
+      type: object
+      required: [name, bbox]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        bbox: { $ref: '#/components/schemas/Bbox' }
+        layers:
+          type: object
+          properties:
+            dtm:       { $ref: '#/components/schemas/AOILayer' }
+            dsm:       { $ref: '#/components/schemas/AOILayer' }
+            clutter:   { $ref: '#/components/schemas/AOILayer' }
+            buildings: { $ref: '#/components/schemas/AOILayer' }
+        clutter_table_ref: { $ref: '#/components/schemas/Reference' }
+        resolution_m: { type: number }
+        notes: { type: string }
+        tags:  { type: array, items: { type: string } }
+
+    ClutterTable:
+      type: object
+      required: [name, taxonomy_id, class_table]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        taxonomy_id: { type: string }
+        class_table:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              attenuation_db_per_band:
+                type: object
+                additionalProperties: { type: number }
+              depolarization_factor: { type: number, minimum: 0, maximum: 1 }
+        applicable_freq_bands:
+          type: array
+          items:
+            type: object
+            properties:
+              min_mhz: { type: number }
+              max_mhz: { type: number }
+        notes: { type: string }
+
+    Mission:
+      type: object
+      required: [name, altitude_min_m_agl, altitude_max_m_agl]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        bbox:    { $ref: '#/components/schemas/Bbox' }
+        polygon: { $ref: '#/components/schemas/Polygon' }
+        altitude_min_m_agl: { type: number, minimum: 0 }
+        altitude_max_m_agl: { type: number, minimum: 0 }
+        altitude_step_m: { type: number, exclusiveMinimum: 0 }
+        duration_estimate_min: { type: number }
+        dock_site_ref: { $ref: '#/components/schemas/Reference' }
+        notes: { type: string }
+        tags:  { type: array, items: { type: string } }
+
+    MeasurementSet:
+      type: object
+      required: [name, points]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        ordered: { type: boolean, default: false }
+        site_ref: { $ref: '#/components/schemas/Reference' }
+        aoi_ref:  { $ref: '#/components/schemas/Reference' }
+        device_ref: { $ref: '#/components/schemas/Reference' }
+        notes: { type: string }
+        csv_asset_ref: { $ref: '#/components/schemas/AssetId' }
+        points: { type: array, items: { $ref: '#/components/schemas/MeasurementPoint' } }
+
+    MeasurementPoint:
+      type: object
+      required: [lat, lon, freq_mhz, observed_signal_dbm, timestamp]
+      properties:
+        lat: { type: number, minimum: -90,  maximum: 90 }
+        lon: { type: number, minimum: -180, maximum: 180 }
+        alt_m_agl: { type: number }
+        alt_reference: { type: string, enum: [agl, amsl] }
+        freq_mhz: { type: number, exclusiveMinimum: 0 }
+        bandwidth_khz: { type: number }
+        observed_signal_dbm: { type: number }
+        observed_metric: { type: string, enum: [rssi, rsrp, rsrq, sinr, snr] }
+        timestamp: { type: string, format: date-time }
+        seq: { type: integer, minimum: 0 }
+        source: { type: string, enum: [manual, camera_trap_log, drone_telemetry, drive_test, other] }
+        uncertainty_db: { type: number }
+        tags: { type: array, items: { type: string } }
+
+    Comparison:
+      type: object
+      required: [name, run_ids]
+      properties:
+        id:      { type: string, readOnly: true }
+        name:    { type: string }
+        share:   { type: string, enum: [private, shared], default: private }
+        version: { type: integer, readOnly: true }
+        run_ids: { type: array, items: { type: string } }
+        notes: { type: string }
+        winner_run_id: { type: string }
+        decision_rationale: { type: string }
+        decided_at: { type: string, format: date-time }
+        tags: { type: array, items: { type: string } }
+
+    # Page wrappers
+    PageOfSites:             { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Site' } } } }] }
+    PageOfAntennas:          { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Antenna' } } } }] }
+    PageOfRadioProfiles:     { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/RadioProfile' } } } }] }
+    PageOfEquipmentProfiles: { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/EquipmentProfile' } } } }] }
+    PageOfAOIPacks:          { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/AOIPack' } } } }] }
+    PageOfClutterTables:     { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ClutterTable' } } } }] }
+    PageOfMissions:          { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Mission' } } } }] }
+    PageOfMeasurementSets:   { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/MeasurementSet' } } } }] }
+    PageOfComparisons:       { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Comparison' } } } }] }
+
+    # ── Assets ────────────────────────────────────────────────────────
+    AssetInitiateRequest:
+      type: object
+      required: [filename, content_type, size_bytes, sha256, purpose]
+      properties:
+        filename:     { type: string }
+        content_type: { type: string }
+        size_bytes:   { type: integer, minimum: 0 }
+        sha256:       { type: string, pattern: '^[0-9a-f]{64}$' }
+        purpose:
+          type: string
+          enum: [antenna_pattern, site_photo, raster_dtm, raster_dsm, raster_clutter, vector_buildings, measurement_csv, generic]
+
+    AssetSession:
+      oneOf:
+        - $ref: '#/components/schemas/AssetSessionAlready'
+        - $ref: '#/components/schemas/AssetSessionDirect'
+        - $ref: '#/components/schemas/AssetSessionMultipart'
+
+    AssetSessionAlready:
+      type: object
+      required: [asset_id, already_exists, ready]
+      properties:
+        asset_id:       { $ref: '#/components/schemas/AssetId' }
+        already_exists: { const: true }
+        ready:          { const: true }
+
+    AssetSessionDirect:
+      type: object
+      required: [asset_id, mode, upload]
+      properties:
+        asset_id: { $ref: '#/components/schemas/AssetId' }
+        mode:     { const: direct }
+        upload:
+          type: object
+          required: [method, url, expires_at]
+          properties:
+            method:  { const: PUT }
+            url:     { type: string, format: uri }
+            headers: { type: object, additionalProperties: { type: string } }
+            expires_at: { type: string, format: date-time }
+
+    AssetSessionMultipart:
+      type: object
+      required: [asset_id, mode, part_size_bytes, parts, complete_url, abort_url]
+      properties:
+        asset_id:        { $ref: '#/components/schemas/AssetId' }
+        mode:            { const: multipart }
+        part_size_bytes: { type: integer, minimum: 5242880 }
+        parts:
+          type: array
+          items:
+            type: object
+            required: [part_number, upload_url, expires_at]
+            properties:
+              part_number: { type: integer, minimum: 1 }
+              upload_url:  { type: string, format: uri }
+              expires_at:  { type: string, format: date-time }
+        complete_url: { type: string, format: uri }
+        abort_url:    { type: string, format: uri }
+
+    AssetCompleteRequest:
+      type: object
+      properties:
+        parts:
+          type: array
+          items:
+            type: object
+            required: [part_number, etag]
+            properties:
+              part_number: { type: integer, minimum: 1 }
+              etag:        { type: string }
+
+    Asset:
+      type: object
+      required: [asset_id, content_type, size_bytes, sha256, ready]
+      properties:
+        asset_id:       { $ref: '#/components/schemas/AssetId' }
+        content_type:   { type: string }
+        size_bytes:     { type: integer, minimum: 0 }
+        sha256:         { type: string, pattern: '^[0-9a-f]{64}$' }
+        ready:          { type: boolean }
+        already_exists: { type: boolean }
+
+    # ── Runs ──────────────────────────────────────────────────────────
+    Run:
+      type: object
+      required: [id, status, operation, submitted_by_key, submitted_at]
+      properties:
+        id: { type: string }
+        submitted_by_key:    { type: string }
+        submitted_at:        { type: string, format: date-time }
+        inputs_resolved_at:  { type: string, format: date-time }
+        completed_at:        { type: string, format: date-time }
+        status: { type: string, enum: [SUBMITTED, QUEUED, RUNNING, COMPLETED, PARTIAL, FAILED, CANCELLED, EXPIRED] }
+        operation: { type: string, enum: [p2p, area, multi_link, multi_tx, voxel] }
+        mode_requested: { type: string, enum: [sync, async, auto] }
+        mode_executed:  { type: string, enum: [sync, async] }
+        inputs_resolved: { type: object }
+        inputs_resolved_sha256: { type: string }
+        engine_version: { type: string }
+        engine_major:   { type: integer }
+        models_used:
+          type: array
+          items:
+            type: object
+            properties:
+              name:    { type: string }
+              version: { type: string }
+        data_layer_versions: { type: array, items: { type: object } }
+        fidelity_tier_dominant:     { $ref: '#/components/schemas/FidelityTier' }
+        fidelity_tier_min:          { $ref: '#/components/schemas/FidelityTier' }
+        fidelity_tier_max:          { $ref: '#/components/schemas/FidelityTier' }
+        fidelity_tier_max_possible: { $ref: '#/components/schemas/FidelityTier' }
+        output_artifact_refs: { type: array, items: { $ref: '#/components/schemas/ArtifactRef' } }
+        warnings: { type: array, items: { type: object, properties: { code: { type: string }, detail: { type: string } } } }
+        error: { $ref: '#/components/schemas/ProblemDetail' }
+        pinned: { type: boolean }
+        cancellation_reason: { type: [string, "null"], enum: [user, expired, sync_budget_exceeded, null] }
+        comparison_id:        { type: [string, "null"] }
+        replay_of_run_id:     { type: [string, "null"] }
+        replay_engine_major_drift: { type: [string, "null"], description: "e.g., '1->2'" }
+
+    RunAccepted:
+      type: object
+      required: [run_id, status_url, mode_executed]
+      properties:
+        run_id:        { type: string }
+        status_url:    { type: string, format: uri }
+        mode_executed: { const: async }
+        reason:        { type: string, enum: [requested, sync_budget_exceeded] }
+        webhook_url:   { type: string, format: uri }
+
+    RunStatus:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id: { type: string }
+        status: { type: string, enum: [SUBMITTED, QUEUED, RUNNING, COMPLETED, PARTIAL, FAILED, CANCELLED, EXPIRED] }
+        stage: { type: string, description: 'Pipeline stage name (§4.1)' }
+        stage_progress_pct: { type: number, minimum: 0, maximum: 100 }
+        started_at: { type: string, format: date-time }
+
+    ArtifactRef:
+      type: object
+      required: [key, class, content_type, materialized]
+      properties:
+        key:           { type: string }
+        class:         { type: string, enum: [canonical, derivative] }
+        content_type:  { type: string }
+        size_bytes:    { type: integer, minimum: 0 }
+        sha256:        { type: [string, "null"] }
+        expires_at:    { type: string, format: date-time }
+        download_url:  { type: [string, "null"], format: uri }
+        materialized:  { type: boolean }
+        materialize_url: { type: [string, "null"], format: uri }
+
+    # ── Webhooks ──────────────────────────────────────────────────────
+    Webhook:
+      type: object
+      required: [id, url, verified]
+      properties:
+        id:          { type: string }
+        url:         { type: string, format: uri }
+        verified:    { type: boolean }
+        verified_at: { type: string, format: date-time }
+        events:      { type: array, items: { type: string } }
+
+    WebhookCreate:
+      type: object
+      required: [url]
+      properties:
+        url:    { type: string, format: uri }
+        events: { type: array, items: { type: string } }
+
+    # ── Analysis Requests ─────────────────────────────────────────────
+    OutputKey:
+      type: string
+      enum:
+        - link_budget
+        - path_profile
+        - geotiff
+        - geotiff_stack
+        - voxel
+        - geojson_contours
+        - kmz
+        - png_with_worldfile
+        - rendered_cross_section
+        - stats
+        - best_server_raster
+        - fidelity_tier_raster
+        - point_query
+        - lora_snr_margin
+        - lora_best_sf
+        - lora_link_metrics
+        - lte_rsrp
+        - lte_rsrq
+        - lte_sinr
+        - lte_mcs_feasibility
+        - c2_pass_fail
+        - c2_range_envelope
+        - drtk_pass_fail
+        - drtk_range_envelope
+
+    MinFidelityCoverage:
+      type: object
+      required: [tier, fraction]
+      properties:
+        tier:     { $ref: '#/components/schemas/FidelityTier' }
+        fraction: { type: number, exclusiveMinimum: 0, maximum: 1 }
+
+    ColorMap:
+      oneOf:
+        - { type: string, description: 'Named colormap.' }
+        - type: object
+          required: [stops]
+          properties:
+            stops:
+              type: array
+              minItems: 2
+              items:
+                type: object
+                required: [value, rgba]
+                properties:
+                  value: { type: number }
+                  rgba:  { type: array, items: { type: integer, minimum: 0, maximum: 255 }, minItems: 4, maxItems: 4 }
+            nodata: { type: array, items: { type: integer, minimum: 0, maximum: 255 }, minItems: 4, maxItems: 4 }
+
+    SiteOrInline:
+      description: 'Reference, inline Site, or bare {lat, lon}. Spec §2.3.'
+      oneOf:
+        - { $ref: '#/components/schemas/Reference' }
+        - { $ref: '#/components/schemas/Site' }
+        - { $ref: '#/components/schemas/LatLon' }
+
+    EquipmentOrInline:
+      oneOf:
+        - { $ref: '#/components/schemas/Reference' }
+        - { $ref: '#/components/schemas/EquipmentProfile' }
+
+    AOIOrInline:
+      oneOf:
+        - { $ref: '#/components/schemas/Reference' }
+        - { $ref: '#/components/schemas/AOIPack' }
+
+    MissionOrInline:
+      oneOf:
+        - { $ref: '#/components/schemas/Reference' }
+        - { $ref: '#/components/schemas/Mission' }
+
+    AnalysisCommon:
+      type: object
+      properties:
+        outputs: { type: array, minItems: 1, uniqueItems: true, items: { $ref: '#/components/schemas/OutputKey' } }
+        mode:                { $ref: '#/components/schemas/Mode' }
+        propagation_model:   { $ref: '#/components/schemas/PropagationModel' }
+        fading_model:        { $ref: '#/components/schemas/FadingModel' }
+        fading_params:       { type: object }
+        min_fidelity_tier:   { $ref: '#/components/schemas/FidelityTier' }
+        min_fidelity_coverage:{ $ref: '#/components/schemas/MinFidelityCoverage' }
+        color_map:           { $ref: '#/components/schemas/ColorMap' }
+        contour_levels_db:   { type: array, items: { type: number } }
+        output_crs:          { type: string }
+        voxel_lossless:      { type: boolean, default: false }
+        measurement_set_refs: { type: array, items: { $ref: '#/components/schemas/Reference' } }
+        freq_tolerance_mhz:  { type: number, exclusiveMinimum: 0 }
+        dedupe:              { type: boolean, default: false }
+        webhook_url:         { type: string, format: uri }
+        point_query_locations: { type: array, items: { $ref: '#/components/schemas/LatLonAlt' } }
+
+    TxSiteEntry:
+      type: object
+      required: [site, equipment]
+      properties:
+        site:      { $ref: '#/components/schemas/SiteOrInline' }
+        equipment: { $ref: '#/components/schemas/EquipmentOrInline' }
+
+    RxTemplateEntry:
+      type: object
+      required: [link_type, equipment]
+      properties:
+        link_type: { $ref: '#/components/schemas/LinkType' }
+        equipment: { $ref: '#/components/schemas/EquipmentOrInline' }
+
+    RequestOpA_P2P:
+      allOf:
+        - $ref: '#/components/schemas/AnalysisCommon'
+        - type: object
+          required: [operation, tx_site, tx_equipment, rx_site, rx_equipment, outputs]
+          properties:
+            operation:    { const: p2p }
+            tx_site:      { $ref: '#/components/schemas/SiteOrInline' }
+            tx_equipment: { $ref: '#/components/schemas/EquipmentOrInline' }
+            rx_site:      { $ref: '#/components/schemas/SiteOrInline' }
+            rx_equipment: { $ref: '#/components/schemas/EquipmentOrInline' }
+            aoi:          { $ref: '#/components/schemas/AOIOrInline' }
+
+    RequestOpB_Area:
+      allOf:
+        - $ref: '#/components/schemas/AnalysisCommon'
+        - type: object
+          required: [operation, tx_site, tx_equipment, rx_template, aoi, resolution_m, outputs]
+          properties:
+            operation:    { const: area }
+            tx_site:      { $ref: '#/components/schemas/SiteOrInline' }
+            tx_equipment: { $ref: '#/components/schemas/EquipmentOrInline' }
+            rx_template:  { $ref: '#/components/schemas/EquipmentOrInline' }
+            rx_altitude_override_m_agl: { type: number }
+            aoi:          { $ref: '#/components/schemas/AOIOrInline' }
+            resolution_m: { type: number, exclusiveMinimum: 0 }
+
+    RequestOpC_MultiLink:
+      allOf:
+        - $ref: '#/components/schemas/AnalysisCommon'
+        - type: object
+          required: [operation, tx_site, rx_templates, aoi, resolution_m, outputs]
+          properties:
+            operation:           { const: multi_link }
+            tx_site:             { $ref: '#/components/schemas/SiteOrInline' }
+            tx_equipment_refs:
+              type: array
+              items: { $ref: '#/components/schemas/EquipmentOrInline' }
+              description: Defaults to the resolved tx_site.default_equipment_refs[].
+            rx_templates:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/RxTemplateEntry' }
+              description: |
+                Exactly one entry per distinct link_type present in the resolved Tx set.
+                Server returns OP_C_RX_TEMPLATE_MISSING if a Tx has no matching template.
+            aoi:                 { $ref: '#/components/schemas/AOIOrInline' }
+            resolution_m:        { type: number, exclusiveMinimum: 0 }
+            combined_site_score:
+              type: object
+              properties:
+                weights_per_link_type:
+                  type: object
+                  additionalProperties: { type: number, minimum: 0 }
+
+    RequestOpD_MultiTx:
+      allOf:
+        - $ref: '#/components/schemas/AnalysisCommon'
+        - type: object
+          required: [operation, tx_sites, rx_template, aoi, resolution_m, outputs]
+          properties:
+            operation:    { const: multi_tx }
+            tx_sites:
+              type: array
+              minItems: 2
+              items: { $ref: '#/components/schemas/TxSiteEntry' }
+              description: Tx index in this array is the value emitted in best_server_raster (1-indexed; 0 = NoData).
+            rx_template:  { $ref: '#/components/schemas/EquipmentOrInline' }
+            aoi:          { $ref: '#/components/schemas/AOIOrInline' }
+            resolution_m: { type: number, exclusiveMinimum: 0 }
+
+    RequestOpE_Voxel:
+      allOf:
+        - $ref: '#/components/schemas/AnalysisCommon'
+        - type: object
+          required: [operation, tx_sites, rx_template, outputs]
+          oneOf:
+            - { required: [mission] }
+            - { required: [aoi, alt_step_m] }
+          properties:
+            operation:    { const: voxel }
+            tx_sites:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/TxSiteEntry' }
+            rx_template:  { $ref: '#/components/schemas/EquipmentOrInline' }
+            mission:      { $ref: '#/components/schemas/MissionOrInline' }
+            aoi:          { $ref: '#/components/schemas/AOIOrInline' }
+            resolution_m: { type: number, exclusiveMinimum: 0 }
+            alt_step_m:   { type: number, exclusiveMinimum: 0 }

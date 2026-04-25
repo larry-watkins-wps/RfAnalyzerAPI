@@ -1,0 +1,54 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Claude Code per-user local overrides (project-shared settings.json is committed)
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# Build artifacts
+dist/
+build/
+site/
+
+# Local artifact stores (per spec §8.2 / §8.5)
+/artifacts/
+/data/
+*.db
+*.sqlite
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/

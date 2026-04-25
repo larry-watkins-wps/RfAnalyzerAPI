@@ -67,36 +67,18 @@ All callers authenticate with an API key. Single-tenant deployment with multiple
 
 The system is composed of cooperating services, packaged together as a Docker Compose stack for local/edge deployment and orchestrated for scaled deployment using the same images.
 
-```
-                       External Caller
-                              │ HTTP/JSON + API key
-                              ▼
-                       API Gateway          (HTTP surface, auth, rate-limit)
-                       /        \
-                      ▼          ▼
-             Catalog Service    Job Orchestrator
-             (entities CRUD,    (sync routing, async
-              sharing, refs)     job lifecycle, webhooks)
-                                       │
-                                       ▼
-                                Message Queue
-                                       │
-                                       ▼
-                              Compute Worker Pool
-                              (engine: pluggable models +
-                               pipeline stages)
-                              /        \
-                             ▼          ▼
-                     Relational DB   Artifact Store
-                     (catalog,       (GeoTIFFs, voxels,
-                      runs,           GeoJSON, KMZ, PNGs,
-                      measurements)   uploaded assets)
-                              ▲
-                              │
-                       Geo Data Service
-                       (DTM/DSM/clutter/buildings,
-                        AOI pack management,
-                        bundled baseline + BYO uploads)
+```mermaid
+flowchart TD
+    Caller([External Caller]) -->|HTTP/JSON + X-Api-Key| Gateway[API Gateway<br/>auth · rate-limit]
+    Gateway --> Catalog[Catalog Service<br/>entities · sharing · refs]
+    Gateway --> Orchestrator[Job Orchestrator<br/>sync routing · async lifecycle · webhooks]
+    Orchestrator --> Queue[(Message Queue)]
+    Queue --> Workers[Compute Worker Pool<br/>pluggable models · pipeline stages]
+    Workers --> DB[(Relational DB<br/>catalog · runs · measurements)]
+    Workers --> Artifacts[(Artifact Store<br/>GeoTIFFs · voxels · KMZ · assets)]
+    Workers --> Geo[Geo Data Service<br/>DTM · DSM · clutter · buildings<br/>AOI packs · BYO uploads]
+    Catalog --> DB
+    Geo --> Artifacts
 ```
 
 ### 2.2 Deployment shape
@@ -129,6 +111,36 @@ The system is composed of cooperating services, packaged together as a Docker Co
   - Keys are remembered for `idempotency_window_days` (default **7**); subsequent reuse creates a new Run.
 - **Error & warning model.** Standard problem-detail JSON; codes enumerated in Appendix D. Runs that succeed at degraded data fidelity return `warnings[]` and status `PARTIAL`; runs at the AOI's maximum possible fidelity return `COMPLETED`.
 - **Pagination & filtering.** List endpoints (sites, antennas, runs, etc.) paginate with cursors and filter by name, owner, share-state, tag.
+
+The mode-selection flow, including the auto-promotion of an overrunning sync request to async:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller
+    participant API as API Gateway / Orchestrator
+    participant Worker
+
+    Caller->>API: POST /v1/analyses/{op} {mode, ...}
+
+    alt resolves to async (requested or auto-selected)
+        API-->>Caller: 202 {run_id, status_url, mode_executed: async, reason: requested}
+        API->>Worker: enqueue
+        Worker-->>API: terminal state
+        opt webhook_url present
+            API-)Caller: POST <webhook_url> (HMAC-signed)
+        end
+    else sync, completes within sync_budget_seconds
+        API->>Worker: enqueue
+        Worker-->>API: terminal state (under 25 s)
+        API-->>Caller: 200 {Run record, mode_executed: sync}
+    else sync, exceeds sync_budget_seconds
+        API->>Worker: enqueue
+        Note over API,Worker: 25 s elapses; run still RUNNING
+        API-->>Caller: 202 {run_id, status_url, mode_executed: async,<br/>reason: sync_budget_exceeded}
+        Worker-->>API: terminal state (run continues normally)
+    end
+```
 
 ### 2.4 Webhooks
 
@@ -270,11 +282,76 @@ POST <complete_url>
   Response: { asset_id, content_type, size_bytes, sha256, ready: true }
 ```
 
+Visualized:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller
+    participant API as API Gateway
+    participant Store as Artifact Store
+
+    Caller->>API: POST /v1/assets:initiate<br/>{filename, content_type, size_bytes, sha256, purpose}
+
+    alt sha256 already in store
+        API-->>Caller: 200 {asset_id, already_exists: true, ready: true}
+    else size_bytes < 50 MB (direct mode)
+        API-->>Caller: 200 {asset_id, mode: direct,<br/>upload: {method: PUT, url, headers, expires_at}}
+        Caller->>Store: PUT <upload.url> (bytes)
+        Store-->>Caller: 200
+        Caller->>API: POST /v1/assets/{id}:complete {}
+        API-->>Caller: 200 {asset_id, sha256, size_bytes, ready: true}
+    else size_bytes >= 50 MB (multipart mode)
+        API-->>Caller: 200 {asset_id, mode: multipart,<br/>part_size_bytes: 16 MiB,<br/>parts: [...], complete_url, abort_url}
+        loop for each part (parallel)
+            Caller->>Store: PUT <parts[i].upload_url>
+            Store-->>Caller: 200 ETag
+        end
+        Caller->>API: POST <complete_url><br/>{parts: [{part_number, etag}, ...]}
+        API-->>Caller: 200 {asset_id, sha256, size_bytes, ready: true}
+    end
+
+    Note over API,Store: If complete not called within 24 h, upload aborted; parts reclaimed.
+```
+
 If `complete` is not called within 24 h of `initiate`, the upload is aborted and any uploaded parts are reclaimed.
 
 **Reference & lifecycle.** Catalog entity fields named `*_asset_ref` carry an `asset_id`. An asset with no inbound references from any catalog entity (including soft-deleted ones) is purged after `asset_orphan_ttl_days` (default **7**). Inbound references from any live or soft-deleted catalog entity keep an asset alive; only hard-purge of the entity removes the reference.
 
 **Local-mode parity.** In offline/Docker-Compose deployments, `upload_url` and `download_url` point back at the API service, which streams to/from a host-mounted volume. The client flow is identical.
+
+### 3.6 Reference graph
+
+Catalog reference relationships between the entities. **Solid edges are live references** — resolved at submission time, version-pinned in `Run.inputs_resolved`. **Dashed edges** show how a Run holds inlined snapshots of resolved entities; the snapshot is independent of the catalog after the SUBMITTED freeze (§3.1).
+
+```mermaid
+erDiagram
+    Site               }o--o{ EquipmentProfile : "default_equipment_refs[]"
+    Site               }o--o| Asset            : "photo_asset_ref"
+
+    EquipmentProfile   }o--|| RadioProfile     : "radio_ref"
+    EquipmentProfile   }o--|| Antenna          : "antenna_ref"
+
+    Antenna            }o--o| Asset            : "pattern_asset_ref"
+
+    AOIPack            }o--o{ Asset            : "dtm/dsm/clutter/buildings refs"
+    AOIPack            }o--o| ClutterTable     : "clutter_table_ref"
+
+    Mission            }o--o| Site             : "dock_site_ref"
+
+    MeasurementSet     }o--o| Site             : "site_ref"
+    MeasurementSet     }o--o| AOIPack          : "aoi_ref"
+    MeasurementSet     }o--o| Asset            : "csv_asset_ref"
+
+    Comparison         }o--o{ Run              : "run_ids[]"
+
+    Run                }o--o{ Asset            : "output_artifact_refs[]"
+    Run                }o..o{ Site             : "snapshot in inputs_resolved"
+    Run                }o..o{ EquipmentProfile : "snapshot in inputs_resolved"
+    Run                }o..o{ AOIPack          : "snapshot in inputs_resolved"
+    Run                }o..o{ Mission          : "snapshot in inputs_resolved"
+    Run                }o..o{ MeasurementSet   : "snapshot in inputs_resolved"
+```
 
 ---
 
@@ -694,15 +771,28 @@ Multiple measurement sets attached to one Run produce multiple report blocks (no
 
 ### 8.1 Run lifecycle
 
-```
-SUBMITTED ──► QUEUED ──► RUNNING ──► COMPLETED
-                            │            │
-                            ▼            ▼
-                         FAILED      PARTIAL
-                                     (warnings, but artifacts produced)
+```mermaid
+stateDiagram-v2
+    [*] --> SUBMITTED
+    SUBMITTED --> QUEUED
+    QUEUED --> RUNNING
+    RUNNING --> COMPLETED: at AOI's max possible fidelity
+    RUNNING --> PARTIAL: degraded fidelity / warnings
+    RUNNING --> FAILED: unrecoverable error
 
-  any non-terminal ──► CANCELLED   (caller-initiated)
-  any non-terminal ──► EXPIRED     (system-enforced timeout)
+    SUBMITTED --> CANCELLED: caller DELETE
+    QUEUED --> CANCELLED: caller DELETE
+    RUNNING --> CANCELLED: caller DELETE
+
+    SUBMITTED --> EXPIRED: timeout
+    QUEUED --> EXPIRED: timeout
+    RUNNING --> EXPIRED: timeout
+
+    COMPLETED --> [*]
+    PARTIAL --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]
+    EXPIRED --> [*]
 ```
 
 - **SUBMITTED** — orchestrator validated and persisted Run record with frozen `inputs_resolved` (timestamp recorded as `inputs_resolved_at`).

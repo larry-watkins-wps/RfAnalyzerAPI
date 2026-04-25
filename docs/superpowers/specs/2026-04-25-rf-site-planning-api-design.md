@@ -11,12 +11,12 @@
 
 ### Purpose
 
-A self-hosted, single-tenant API service that performs RF propagation analysis for site planning. Primary users are wildlife-protection field engineers placing **DJI Docks**, **camera traps**, **LoRa gateways**, **D-RTK 3 relays**, and **LTE backhaul equipment** in remote/protected areas. Representative questions the system answers:
+A self-hosted, single-tenant API service that performs RF propagation analysis for site planning. The system targets field engineers placing **autonomous drone docks**, **sub-GHz IoT endpoints** (e.g., camera traps, fence/gate sensors, animal collars), **LoRa gateways**, **GNSS RTK base stations**, and **LTE backhaul equipment** in remote/protected areas. Wildlife-protection deployments are the primary driver of v1 design — see worked examples — but no spec primitive is wildlife- or vendor-specific. Representative questions the system answers:
 
-- "From this candidate dock site, what's the LoRa coverage to the camera-trap network in this AOI?"
-- "Will the DJI 2.4 GHz C2 link hold across this drone flight envelope at 60–120 m AGL?"
-- "Of these five candidate dock sites, which gives the best combined LoRa + LTE + D-RTK coverage?"
-- "Does observed RSSI at deployed camera traps match what we predicted six months ago?"
+- "From this candidate gateway site, what's the LoRa coverage to the IoT-sensor network in this AOI?"
+- "Will the 2.4 GHz drone C2 link hold across this flight envelope at 60–120 m AGL?"
+- "Of these five candidate dock sites, which gives the best combined LoRa + LTE + RTK coverage?"
+- "Does observed RSSI at deployed sensors match what we predicted six months ago?"
 
 ### In scope
 
@@ -24,7 +24,7 @@ A self-hosted, single-tenant API service that performs RF propagation analysis f
   - LoRa (sub-GHz ISM, 868/915 MHz)
   - LTE (600 MHz–3.5 GHz)
   - 2.4/5.8 GHz drone C2/video
-  - D-RTK 3 relay links
+  - GNSS RTK correction links
 - Five analysis operations: point-to-point, area heatmap, multi-link site report, multi-Tx best-server, 3D/volumetric coverage.
 - Adaptive geo-data fidelity (terrain only → DTM+clutter → DSM → DSM+buildings).
 - Field-measurement storage and predicted-vs-observed reporting.
@@ -98,7 +98,7 @@ flowchart TD
   
   The chosen mode is echoed as `mode_executed` in the response and recorded on the Run record.
 - **Sync budget.** Sync responses are bounded by `sync_budget_seconds` (default **25**, kept under typical proxy/ALB timeouts). On overrun the run is auto-promoted to async and the response returns `202 {run_id, status_url, mode_executed: "async", reason: "sync_budget_exceeded"}`. Async responses always return `{run_id, status_url, mode_executed: "async", optional webhook_url}`.
-- **Reference shape.** Any field that names a catalog entity (Site, Radio Profile, Antenna, Equipment Profile, AOI Pack, Mission, Measurement Set, ClutterTable, Comparison) accepts either a reference or a fully inlined object. Reference shape:
+- **Reference shape.** Any field that names a catalog entity (Site, Radio Profile, Antenna, Equipment Profile, AOI Pack, Operating Volume, Measurement Set, ClutterTable, Comparison) accepts either a reference or a fully inlined object. Reference shape:
   ```
   { ref: <name>, owner?: "self" | "shared", version?: <int> | "latest" }
   ```
@@ -161,7 +161,7 @@ sequenceDiagram
 | `POST` `GET` `PATCH` `DELETE` | `/v1/equipment-profiles` (and `/{id}`) | sync | `catalog.*` |
 | `POST` `GET` `PATCH` `DELETE` | `/v1/aoi-packs` (and `/{id}`) | sync (create may be async) | `catalog.*` |
 | `POST` `GET` `PATCH` `DELETE` | `/v1/clutter-tables` (and `/{id}`) | sync | `catalog.*` |
-| `POST` `GET` `PATCH` `DELETE` | `/v1/missions` (and `/{id}`) | sync | `catalog.*` |
+| `POST` `GET` `PATCH` `DELETE` | `/v1/operating-volumes` (and `/{id}`) | sync | `catalog.*` |
 | `POST` `GET` `PATCH` `DELETE` | `/v1/measurements` (and `/{id}`) | sync | `measurements.*` |
 | `POST` | `/v1/measurements/{id}:append` | sync | `measurements.write` |
 | `POST` `GET` `PATCH` `DELETE` | `/v1/comparisons` (and `/{id}`) | sync | `catalog.*` |
@@ -197,22 +197,22 @@ sequenceDiagram
 - **Natural key:** `(owner_api_key, name, entity_type)`.
 - **Stable internal ID:** survives renames; used in references that should not break on rename.
 - **Sharing:** every entity has a `share` flag with values `private` (default — visible only to the creating key) or `shared` (readable by any key in the tenant; only the owner can write). Cross-key referencing by key id is not supported.
-- **Versioning:** Antenna, Radio Profile, Equipment Profile, Site, AOI Pack, ClutterTable, Mission, and Measurement Set version on edit. References can pin to a specific version (`version: <int>`) or float to `"latest"`. Runs always resolve to a specific version, recorded in `Run.inputs_resolved`.
+- **Versioning:** Antenna, Radio Profile, Equipment Profile, Site, AOI Pack, ClutterTable, Operating Volume, and Measurement Set version on edit. References can pin to a specific version (`version: <int>`) or float to `"latest"`. Runs always resolve to a specific version, recorded in `Run.inputs_resolved`.
 - **`inputs_resolved` freeze point:** frozen at the SUBMITTED transition, after orchestrator validation, before QUEUED. Catalog edits after the freeze point have no effect on the in-flight run. The exact freeze time is recorded on the Run as `inputs_resolved_at`.
 - **Soft delete:** deletes mark records hidden but do not break runs that reference them. Soft-deleted shared entities are hidden from list endpoints and return `404` on `GET` by name; resolution by stable internal ID continues to work for in-flight runs and historical `inputs_resolved`. Hard delete only via explicit purge.
-- **Tags:** free-form tags on Site, AOI Pack, Equipment Profile, Mission, Comparison.
+- **Tags:** free-form tags on Site, AOI Pack, Equipment Profile, Operating Volume, Comparison.
 
 ### 3.2 First-class entities (9 total)
 
 | Entity | Required fields | Notable optional fields | Purpose |
 |---|---|---|---|
-| **Site** | `name`, `lat`, `lon` | `ground_elevation_override_m`, `default_equipment_refs[]`, `notes`, `tags[]`, `photo_asset_ref` | Named geographic point. `default_equipment_refs[]` lists Equipment Profiles intended to be deployed at this site (LoRa + LTE + D-RTK + 2.4 GHz C2 etc.). Op C uses these by default; analysis requests may override. |
-| **Radio Profile** | `name`, `link_type` (`lora` / `lte` / `drone_c2` / `drtk` / `generic`), `freq_mhz`, `bandwidth_khz`, `tx_power_dbm`, `rx_sensitivity_dbm` | LoRa: `spreading_factor`, `coding_rate`. LTE: `band`, `earfcn`. C2: `mode_label`. Generic: `modulation`, `fade_margin_db_target`. `propagation_model_pref` (auto / explicit). | RF parameters; antenna-agnostic. |
+| **Site** | `name`, `lat`, `lon` | `ground_elevation_override_m`, `default_equipment_refs[]`, `notes`, `tags[]`, `photo_asset_ref` | Named geographic point. `default_equipment_refs[]` lists Equipment Profiles intended to be deployed at this site (e.g., a LoRa gateway + LTE backhaul + RTK base + 2.4 GHz drone C2 colocated at one tower). Op C uses these by default; analysis requests may override. |
+| **Radio Profile** | `name`, `link_type` (string; `generic` is built-in, additional values registered by link-type plugins — see §4.6), `freq_mhz`, `bandwidth_khz`, `tx_power_dbm`, `rx_sensitivity_dbm` | Per-plugin extension fields. Bundled plugins ship `lora` (`spreading_factor`, `coding_rate`), `lte` (`band`, `earfcn`), `drone_c2` (`mode_label`), `rtk` (`mode_label`); each plugin's contract names the fields it consumes. Plus `modulation`, `fade_margin_db_target` (used by `generic`), `propagation_model_pref` (auto / explicit). | RF parameters; antenna-agnostic. |
 | **Antenna** | `name`, `kind` (`parametric` / `pattern_file`), `gain_dbi`, `polarization`, `applicable_bands: [{min_mhz, max_mhz}, …]` | `applicable_polarizations[]`. Parametric: `pattern_type` (omni / sector), `h_beamwidth_deg`, `v_beamwidth_deg`, `electrical_downtilt_deg`. File: `format` (msi/adf/ant/csv), `pattern_asset_ref`. | Antenna spec; orientation comes from Equipment. The engine warns (`MODEL_OUT_OF_NOMINAL_FREQ`) at use within ±10 % of the declared band edge and fails (`ANTENNA_OUT_OF_BAND`) at >25 %. |
 | **Equipment Profile** | `name`, `radio_ref`, `antenna_ref`, `mount_height_m_agl`, `cable_loss_db` | `cable_loss_curve: [{freq_mhz, loss_db}]` (overrides scalar via piecewise-linear interpolation), `azimuth_deg`, `mechanical_downtilt_deg`, `mfr`, `model`, `notes` | Deployable bundle of radio + antenna + mounting. `cable_loss_db` is evaluated at the bound radio's center frequency. |
 | **AOI Pack** | `name`, `bbox` (south, west, north, east) | `dtm_ref`, `dsm_ref`, `clutter_ref`, `buildings_ref`, `clutter_table_ref`, `source` (bundled / byo / fetched), per-layer `upstream_source`, `upstream_version`, `acquired_at`, `content_sha256`, `resolution_m`, `notes` | Region with attached geo-data layers. Per-layer provenance fields (§5.3). |
 | **ClutterTable** | `name`, `taxonomy_id`, `class_table` (mapping class_id → per-band attenuation in dB) | `depolarization_factor_per_class` (mapping class_id → `d ∈ [0, 1]`), `notes`, `applicable_freq_bands` | Per-class attenuation table; depolarization factor consumed by polarization mismatch (§4.5). |
-| **Mission / Flight Envelope** | `name`, `bbox` *or* `polygon`, `altitude_min_m_agl`, `altitude_max_m_agl` | `altitude_step_m`, `duration_estimate_min`, `dock_site_ref`, `notes` | Drone operating volume for 3D coverage operations. |
+| **Operating Volume** | `name`, `bbox` *or* `polygon`, `altitude_min_m_agl`, `altitude_max_m_agl` | `altitude_step_m`, `duration_estimate_min`, `home_site_ref`, `host_site_ref`, `notes` | A 3D region of interest for volumetric coverage analysis. Drone-flight-envelope is the primary use case (Op E with `home_site_ref` pointing at the drone dock or launch site); also covers tower vertical-pattern surveys, tethered-balloon links, and any other case needing per-altitude evaluation. `home_site_ref` names a return-to-home / launch-recovery anchor (drone-specific semantics). `host_site_ref` names the operational anchor for non-recovering deployments. Both are optional and orthogonal — typically the same Site, sometimes different, sometimes neither. |
 | **Measurement Set** | `name`, `points[]` where each `= {lat, lon, alt_m_agl, freq_mhz, observed_signal_dbm, observed_metric, timestamp, source}` | `ordered: bool` (default `false`; tracks set this `true`), per-point `seq: int` (when `ordered`), `device_ref`, `site_ref` *or* `aoi_ref`, `notes`, per-point `bandwidth_khz`, `uncertainty_db`, `tags` | Stored field RSSI/RSRP observations. A point cloud (camera traps) by default; tracks set `ordered: true` and supply `seq` per point. |
 | **Comparison / Plan** | `name`, `run_ids[]` | `notes`, `winner_run_id`, `decision_rationale`, `decided_at` | Captures a real placement decision with the runs that informed it. |
 
@@ -236,14 +236,19 @@ A Run is a first-class persisted record but not a catalog entity (no name-based 
 
 ### 3.4 Standard profile library
 
-Ships under a reserved owner key (`system`), all entries `share=shared`, read-only. Includes:
+Ships under a reserved owner key (`system`), all entries `share=shared`, read-only. The library carries vendor-specific instances built on top of the generic catalog primitives — Antenna, Radio Profile, Equipment Profile — without those primitives encoding any vendor concept. Each seed entry is a concrete instance of the same shapes a deployment operator would create themselves.
 
-- Common antennas (omni 2/3/6/8 dBi reference, generic sector 60/90/120°, drone/D-RTK approximations).
-- Common radio profiles (LoRa-868-EU, LoRa-915-US, LTE common bands, generic 2.4 GHz drone C2, D-RTK 3, etc.).
-- Equipment profiles for common gear (DJI Dock 2 with stock antennas, generic camera-trap LoRa nodes).
-- System ClutterTables for ESA WorldCover and Copernicus CGLS taxonomies, pre-tuned per ITU-R P.833 / P.2108 across LoRa, LTE, 2.4, 5.8 GHz bands, with per-class `depolarization_factor` populated.
+Bundled categories with representative entries (the list expands as plugins land; this is illustrative, not exhaustive):
 
-Operators clone-and-customize but cannot mutate `system`-owned entries.
+- **Antennas.** Omni 2/3/6/8 dBi reference; generic sector 60°/90°/120°; sub-GHz IoT endpoint patches; drone/RTK 2.4 GHz approximations.
+- **Radio Profiles.** LoRa-868-EU, LoRa-915-US (LoRa link-type plugin); LTE common bands (LTE plugin); generic 2.4 GHz drone C2 (drone_c2 plugin); 2.4 GHz RTK base/rover (rtk plugin).
+- **Equipment Profiles — autonomous drone docks** (built on `drone_c2` Radio + 2.4 GHz dock antenna + `Site` for the dock location). Seed entries cover specific dock products such as DJI Dock 2; operators clone-and-customize for other vendors.
+- **Equipment Profiles — sub-GHz IoT endpoints** (built on a LoRa Radio Profile + an endpoint antenna). Seed entries: `camera-trap-lora-rx`, `fence-sensor-lora-rx`, `gate-sensor-lora-rx`, `wildlife-collar-lora-tx`. Each is an Equipment Profile — a deployment-shaped concept built on the generic catalog primitives, not a baked-in entity type.
+- **Equipment Profiles — LTE backhaul** (LTE Radio + handset/CPE antenna).
+- **Equipment Profiles — RTK base/rover** (RTK Radio + 2.4 GHz omni). Seed entry covers DJI D-RTK 3 as an example concrete instance; the underlying primitives are vendor-neutral.
+- **System ClutterTables.** ESA WorldCover and Copernicus CGLS taxonomies, pre-tuned per ITU-R P.833 / P.2108 across LoRa, LTE, 2.4, 5.8 GHz bands, with per-class `depolarization_factor` populated.
+
+Operators clone-and-customize but cannot mutate `system`-owned entries. New device types — a different sensor product, a new dock vendor, a non-RF telemetry endpoint — are added by creating Equipment Profiles in the catalog; no spec change is needed unless the device introduces a fundamentally new link-type, in which case the operator (or a plugin author) registers a link-type plugin per §4.6.
 
 ### 3.5 Assets (binary blobs)
 
@@ -337,7 +342,8 @@ erDiagram
     AOIPack            }o--o{ Asset            : "dtm/dsm/clutter/buildings refs"
     AOIPack            }o--o| ClutterTable     : "clutter_table_ref"
 
-    Mission            }o--o| Site             : "dock_site_ref"
+    OperatingVolume    }o--o| Site             : "home_site_ref"
+    OperatingVolume    }o--o| Site             : "host_site_ref"
 
     MeasurementSet     }o--o| Site             : "site_ref"
     MeasurementSet     }o--o| AOIPack          : "aoi_ref"
@@ -349,7 +355,7 @@ erDiagram
     Run                }o..o{ Site             : "snapshot in inputs_resolved"
     Run                }o..o{ EquipmentProfile : "snapshot in inputs_resolved"
     Run                }o..o{ AOIPack          : "snapshot in inputs_resolved"
-    Run                }o..o{ Mission          : "snapshot in inputs_resolved"
+    Run                }o..o{ OperatingVolume  : "snapshot in inputs_resolved"
     Run                }o..o{ MeasurementSet   : "snapshot in inputs_resolved"
 ```
 
@@ -371,7 +377,7 @@ Per-operation Tx/Rx convention:
 | **B (Area)** | One `tx_site` + `tx_equipment_ref` | One `rx_template` Equipment Profile applied at every grid sample at the template's `mount_height_m_agl` (or an `rx_altitude_override_m_agl` per-call) |
 | **C (Multi-link)** | One `tx_site` + `tx_equipment_refs[]` (defaults to the site's `default_equipment_refs[]`); each evaluated independently | `rx_templates[]`, each entry an Equipment Profile keyed by the radio's `link_type`. **Exactly one Rx template per distinct `link_type` present in the Tx set.** Each Tx is paired with the Rx template whose `link_type` matches; multiple Tx of the same `link_type` share one Rx template. Unmatched Tx fail validation with `OP_C_RX_TEMPLATE_MISSING`. |
 | **D (Multi-Tx)** | List of `tx_sites[]` with `equipment_ref` per site | One `rx_template` applied against all candidate Tx |
-| **E (3D)** | One (or more) `tx_site` + `tx_equipment_ref` | One `rx_template` applied at every (grid sample, altitude) drawn from the Mission envelope (or an inline `bbox + altitudes[]`) |
+| **E (3D)** | One (or more) `tx_site` + `tx_equipment_ref` | One `rx_template` applied at every (grid sample, altitude) drawn from the Operating Volume (or an inline `bbox + altitudes[]`) |
 
 Coordinates may be inlined in place of a Site reference (per §2.3 reference shape). Equipment Profiles may be inlined or referenced.
 
@@ -393,7 +399,7 @@ Every analysis flows through a subset of these stages, in order:
 7. **Apply antenna gains.** Look up Tx and Rx gain at the bearing+elevation of the path. Compute polarization mismatch loss per §4.5.
 8. **Run propagation model.** The selected model plugin computes path loss given the profile, frequency, geometry, and any model-specific parameters.
 9. **Aggregate link budget.** Total received power = Tx power + Tx gain − cable loss − path loss − clutter loss − polarization mismatch − Rx feeder loss + Rx gain. Compute fade margin vs. Rx sensitivity and link availability % from a fading model. Fading model selection: `auto` by default — Rayleigh in dense clutter / non-line-of-sight, Rician (with K-factor varying by clearance) in line-of-sight, log-normal shadowing applied per environment class. Caller can pin `fading_model` and `fading_params` per call; chosen model is recorded in the link budget.
-10. **Emit link-type semantics.** If `link_type ≠ generic`, run the type-specific stage (LoRa SNR/best-SF/time-on-air; LTE RSRP/RSRQ/SINR/MCS; drone C2 pass/fail and range envelope; D-RTK pass/fail and range envelope).
+10. **Emit link-type semantics.** If `link_type ≠ generic`, dispatch to the registered link-type plugin (§4.6). Bundled plugins: LoRa emits SNR/best-SF/time-on-air; LTE emits RSRP/RSRQ/SINR/MCS; drone C2 emits pass/fail and range envelope; RTK emits pass/fail and range envelope.
 11. **Render artifacts.** Format the result into every canonical artifact required and every derivative the caller requested in `outputs[]`.
 12. **Persist & finalize.** Write artifacts to artifact store, write Run record, trigger webhook if async.
 
@@ -484,6 +490,60 @@ mismatch_loss_db =
 ```
 
 The 3 dB floor avoids implausibly clean cross-pol in dense canopy. The computed value, the base value, and the `d` used are recorded as separate lines in the link budget.
+
+### 4.6 Link-type plugin contract
+
+The `link_type` field on Radio Profiles is an open string. Only `generic` is built into the core engine; every other link-type — `lora`, `lte`, `drone_c2`, `rtk`, and any future addition (5G NR, satellite L/S, ham VHF/UHF, Wi-Fi mesh, etc.) — is registered by a link-type plugin. Bundled plugins ship by default; operators can install additional plugins without spec changes.
+
+A link-type plugin declares:
+
+```
+LinkTypePluginCapabilities {
+  link_type: str                    # e.g., "lora"; lowercase, snake_case
+  version: str
+  display_name: str                 # human-friendly, for error messages and UI
+
+  # Radio Profile extension
+  radio_profile_extension_schema: JSONSchema
+                                    # additional Radio Profile fields this plugin
+                                    # consumes (e.g., LoRa: spreading_factor)
+
+  # Outputs the plugin can emit (canonical artifacts, named keys)
+  declared_outputs: [
+    { key: str,                     # e.g., "lora_best_sf"
+      class: "canonical" | "derivative",
+      content_type: str,
+      description: str }
+  ]
+
+  # Acceptable measurement metrics for §7.3 metric coherence filter
+  accepted_observed_metrics: [str]  # e.g., ["rssi", "snr"]
+
+  # Default colormaps registered for this plugin's outputs
+  declared_colormaps: { <name>: <ColorMap> }
+
+  # Auto-select hint: which scenarios should the engine prefer for this link_type
+  scenario_hints: { terrestrial_p2p, terrestrial_area, air_to_ground, ... }
+}
+
+LinkTypePluginInterface {
+  capabilities() -> LinkTypePluginCapabilities
+
+  # Stage 10: type-specific computation given the aggregated link budget
+  emit(link_budget, outputs_requested, params) -> { artifacts, warnings }
+
+  # Pre-flight validation hook (called during Stage 2)
+  validate(radio_profile, equipment_profile, geometry) -> [warnings, errors]
+}
+```
+
+**Resolution.** When a Radio Profile carries `link_type: X`, the engine looks up the plugin registered for `X`. If none is registered, validation fails at Stage 2 with `LINK_TYPE_NOT_REGISTERED`. The `generic` link-type is special — it is implemented in core and always available; it falls back to the generic stage-10 path (received-power + fade-margin only, no specialized outputs).
+
+**Output keys.** Plugin-declared output keys are namespaced by the plugin (e.g., LoRa contributes `lora_snr_margin`, `lora_best_sf`, `lora_link_metrics`). Per-link-aggregation rules in §6.1 apply unchanged: `<key>.<link_type>` for Op C, `<key>.<tx_label>` for Op D.
+
+**Versioning and reproducibility.** A plugin's version string flows through `Run.models_used[]` alongside propagation models, so reruns are reproducible against the exact plugin revision.
+
+**Bundled plugins.** v1 ships `lora`, `lte`, `drone_c2`, `rtk`. Their declared outputs and accepted metrics are documented in §6.2 and §7.3 respectively; those sections are the authoritative reference for the bundled contracts.
 
 ---
 
@@ -616,9 +676,9 @@ Emitted when `radio.link_type ≠ generic` and the caller opts in via the `outpu
 - `c2_pass_fail` — per-pixel pass/fail at the radio's RC sensitivity threshold.
 - `c2_range_envelope` — GeoJSON polygon of the maximum operating envelope per altitude.
 
-**D-RTK (`drtk`):**
-- `drtk_pass_fail` — per-pixel pass/fail at relay sensitivity.
-- `drtk_range_envelope` — GeoJSON polygon of the relay's effective coverage.
+**RTK (`rtk`):**
+- `rtk_pass_fail` — per-pixel pass/fail at correction-link sensitivity.
+- `rtk_range_envelope` — GeoJSON polygon of the RTK base/relay's effective correction coverage.
 
 ### 6.3 Color mapping
 
@@ -636,7 +696,7 @@ Every operation can return a `point_query` result: caller passes a list of `{lat
 
 ### 6.5 Multi-link operation (Op C) aggregation
 
-When a single site has multiple equipment profiles (LoRa + LTE + D-RTK + 2.4 GHz C2), Op C runs the pipeline once per equipment-profile and produces:
+When a single site has multiple equipment profiles (e.g., LoRa + LTE + RTK + 2.4 GHz drone C2), Op C runs the pipeline once per equipment-profile and produces:
 
 - A per-link result block (each containing whatever artifacts the caller requested for that link).
 - An optional `combined_site_score` JSON with per-link pass/fail summary, weakest-link identification, and a weighted score. Default weights treat all link types equally with weakest link as the gating factor; callers may supply custom weights.
@@ -733,7 +793,7 @@ When a Run is submitted with a `measurement_set_ref` attached (or when a Run's A
    | lora | `rssi`, `snr` |
    | lte | `rsrp`, `rsrq`, `sinr` |
    | drone_c2 | `rssi` |
-   | drtk | `rssi` |
+   | rtk | `rssi` |
    | generic | `rssi` |
 
    Mismatched points are filtered out and counted with reason `OBSERVED_METRIC_MISMATCH`. Cross-metric conversion (e.g., RSSI → RSRP) is **not** performed.
@@ -999,8 +1059,8 @@ Legend: ✓ canonical, ✦ derivative, — not applicable.
 |---|---|---|---|
 | 868 / 915 MHz (LoRa ISM) | LoRa | P.1812, ITM | High — clutter (T2+) materially affects forest predictions |
 | 600 MHz – 3.5 GHz (LTE) | LTE | P.1812, ITM | Medium — clutter helpful, DSM helpful in urban |
-| 2.4 GHz | drone_c2, drtk, generic | P.1812, ITM, P.528 (air-to-ground) | High — DSM (T3+) crucial for low-altitude links |
-| 5.8 GHz | drone_c2, drtk | P.1812, ITM, P.528 | High — same as 2.4 GHz |
+| 2.4 GHz | drone_c2, rtk, generic | P.1812, ITM, P.528 (air-to-ground) | High — DSM (T3+) crucial for low-altitude links |
+| 5.8 GHz | drone_c2, rtk | P.1812, ITM, P.528 | High — same as 2.4 GHz |
 
 ---
 
@@ -1034,6 +1094,7 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 | `RX_TX_FREQ_MISMATCH` | Rx and Tx Equipment Profile frequencies disagree by more than `tx.radio.bandwidth_khz × 1.5 / 1000` MHz. |
 | `ANTENNA_OUT_OF_BAND` | Antenna used at a frequency >25 % outside its `applicable_bands`. |
 | `OP_C_RX_TEMPLATE_MISSING` | Op C request has a Tx whose `link_type` has no matching `rx_template`. |
+| `LINK_TYPE_NOT_REGISTERED` | A Radio Profile's `link_type` does not match any registered link-type plugin (§4.6) and is not `generic`. |
 | `FIDELITY_FLOOR_NOT_MET` | `min_fidelity_tier` (per-pixel) or `min_fidelity_coverage` not satisfied. |
 | `PINNED_MODEL_OUT_OF_RANGE` | Caller-pinned propagation model's frequency range does not cover the radio. |
 | `PINNED_MODEL_DATA_TIER_INSUFFICIENT` | Caller-pinned propagation model requires data layers absent in the AOI. |
@@ -1093,3 +1154,11 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 - **Appendix A** — derivative-vs-canonical legend; `fidelity_tier_raster` row added.
 - **Appendix C** — Asset / canonical / derivative / PvO definitions added.
 - **Appendix D (new)** — warnings, errors, filter reasons enumeration.
+
+### v2 in-review patches (2026-04-25)
+
+- **§1, §3.4** — vendor-specific narrative replaced with category-level framing; vendor entries (DJI Dock 2, D-RTK 3) demoted to seed-library examples built on the generic primitives. Added sensor seed examples (camera trap, fence sensor, gate sensor, wildlife collar) as Equipment Profiles; no new entity types introduced.
+- **§3.2 (Radio Profile)** — `link_type` opened from a closed enum to a string; only `generic` is core. Bundled plugins ship for `lora`, `lte`, `drone_c2`, `rtk`. See §4.6.
+- **§3.2 (Operating Volume)** — `Mission / Flight Envelope` renamed to `Operating Volume`; description generalized beyond drone use cases. `dock_site_ref` replaced with two optional fields `home_site_ref` (return-to-home / launch-recovery anchor) and `host_site_ref` (operational anchor for non-recovering deployments). API path `/v1/missions` → `/v1/operating-volumes`.
+- **§4.6 (new)** — Link-type plugin contract parallel to §4.2 model plugin contract; declares `LINK_TYPE_NOT_REGISTERED` (Appendix D).
+- **§6.2, §7.3, Appendix B** — `drtk` link-type renamed to `rtk` (RTK is the general concept; "relay" is not). Output keys `drtk_pass_fail` / `drtk_range_envelope` → `rtk_pass_fail` / `rtk_range_envelope`.

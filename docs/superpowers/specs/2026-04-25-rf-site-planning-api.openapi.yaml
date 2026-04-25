@@ -176,23 +176,23 @@ paths:
     patch:  { tags: [catalog], operationId: updateClutterTable, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } }, responses: { '200': { description: Updated. } } }
     delete: { tags: [catalog], operationId: deleteClutterTable, responses: { '204': { description: Soft-deleted. } } }
 
-  # ── Missions ─────────────────────────────────────────────────────────
-  /missions:
+  # ── Operating Volumes ────────────────────────────────────────────────
+  /operating-volumes:
     get:
       tags: [catalog]
-      operationId: listMissions
+      operationId: listOperatingVolumes
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }, { $ref: '#/components/parameters/FilterShare' }]
-      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfMissions' } } } } }
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfOperatingVolumes' } } } } }
     post:
       tags: [catalog]
-      operationId: createMission
-      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Mission' } } } }
+      operationId: createOperatingVolume
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } }
       responses: { '201': { description: Created. } }
-  /missions/{id}:
+  /operating-volumes/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getMission,    responses: { '200': { description: Mission., content: { application/json: { schema: { $ref: '#/components/schemas/Mission' } } } } } }
-    patch:  { tags: [catalog], operationId: updateMission, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Mission' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [catalog], operationId: deleteMission, responses: { '204': { description: Soft-deleted. } } }
+    get:    { tags: [catalog], operationId: getOperatingVolume,    responses: { '200': { description: OperatingVolume., content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } } } }
+    patch:  { tags: [catalog], operationId: updateOperatingVolume, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteOperatingVolume, responses: { '204': { description: Soft-deleted. } } }
 
   # ── Comparisons ──────────────────────────────────────────────────────
   /comparisons:
@@ -578,8 +578,9 @@ components:
     Unprocessable:
       description: |
         Schema-valid but semantically invalid: RX_TX_FREQ_MISMATCH,
-        OP_C_RX_TEMPLATE_MISSING, ANTENNA_OUT_OF_BAND, FIDELITY_FLOOR_NOT_MET,
-        IDEMPOTENCY_KEY_BODY_MISMATCH, AOI_OUT_OF_BBOX, etc.
+        OP_C_RX_TEMPLATE_MISSING, LINK_TYPE_NOT_REGISTERED, ANTENNA_OUT_OF_BAND,
+        FIDELITY_FLOOR_NOT_MET, IDEMPOTENCY_KEY_BODY_MISMATCH,
+        AOI_OUT_OF_BBOX, etc.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } }
     RateLimited:
       description: Rate limit, storage quota, or pin cap exceeded.
@@ -608,6 +609,7 @@ components:
             - RX_TX_FREQ_MISMATCH
             - ANTENNA_OUT_OF_BAND
             - OP_C_RX_TEMPLATE_MISSING
+            - LINK_TYPE_NOT_REGISTERED
             - FIDELITY_FLOOR_NOT_MET
             - PINNED_MODEL_OUT_OF_RANGE
             - PINNED_MODEL_DATA_TIER_INSUFFICIENT
@@ -701,7 +703,16 @@ components:
               items: { type: number }
 
     Polarization: { type: string, enum: [V, H, RHCP, LHCP, slant-45, dual] }
-    LinkType:     { type: string, enum: [lora, lte, drone_c2, drtk, generic] }
+    LinkType:
+      type: string
+      minLength: 1
+      pattern: '^[a-z][a-z0-9_]*$'
+      description: |
+        Open string. `generic` is the only built-in core value; other values
+        are registered by link-type plugins (spec §4.6). Bundled plugins ship
+        `lora`, `lte`, `drone_c2`, `rtk`. Server returns
+        LINK_TYPE_NOT_REGISTERED if the value is not registered.
+      examples: [generic, lora, lte, drone_c2, rtk]
     FidelityTier: { type: string, enum: [T0_FREE_SPACE, T1_TERRAIN, T2_TERRAIN_PLUS_CLUTTER, T3_SURFACE, T4_SURFACE_PLUS_BUILDINGS] }
     Mode:         { type: string, enum: [sync, async, auto], default: auto }
     PropagationModel: { type: string, enum: [auto, p1812, p526, itm, p528, p530, friis, two_ray], default: auto }
@@ -859,8 +870,13 @@ components:
               max_mhz: { type: number }
         notes: { type: string }
 
-    Mission:
+    OperatingVolume:
       type: object
+      description: |
+        A 3D region of interest for volumetric coverage analysis (spec §3.2).
+        Drone flight envelope is the primary use case; also covers tower
+        vertical-pattern surveys, tethered-balloon links, and any other case
+        needing per-altitude evaluation.
       required: [name, altitude_min_m_agl, altitude_max_m_agl]
       properties:
         id:      { type: string, readOnly: true }
@@ -873,7 +889,14 @@ components:
         altitude_max_m_agl: { type: number, minimum: 0 }
         altitude_step_m: { type: number, exclusiveMinimum: 0 }
         duration_estimate_min: { type: number }
-        dock_site_ref: { $ref: '#/components/schemas/Reference' }
+        home_site_ref:
+          allOf:
+            - $ref: '#/components/schemas/Reference'
+          description: Return-to-home / launch-recovery anchor (drone-specific semantics).
+        host_site_ref:
+          allOf:
+            - $ref: '#/components/schemas/Reference'
+          description: Operational anchor for non-recovering deployments. Often the same Site as `home_site_ref`; sometimes different; either or both may be omitted.
         notes: { type: string }
         tags:  { type: array, items: { type: string } }
 
@@ -933,7 +956,7 @@ components:
     PageOfEquipmentProfiles: { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/EquipmentProfile' } } } }] }
     PageOfAOIPacks:          { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/AOIPack' } } } }] }
     PageOfClutterTables:     { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ClutterTable' } } } }] }
-    PageOfMissions:          { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Mission' } } } }] }
+    PageOfOperatingVolumes:  { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OperatingVolume' } } } }] }
     PageOfMeasurementSets:   { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/MeasurementSet' } } } }] }
     PageOfComparisons:       { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Comparison' } } } }] }
 
@@ -1115,7 +1138,16 @@ components:
     # ── Analysis Requests ─────────────────────────────────────────────
     OutputKey:
       type: string
-      enum:
+      minLength: 1
+      pattern: '^[a-z][a-z0-9_]*$'
+      description: |
+        Output artifact key. Core keys are universal; per-link-type semantic
+        keys are declared by link-type plugins (spec §4.6). Server validates
+        against the union of core keys and currently-registered plugin
+        outputs. The `examples` list captures core keys plus bundled-plugin
+        outputs as of v1; the schema is intentionally not closed so additional
+        plugins can ship without an OpenAPI revision.
+      examples:
         - link_budget
         - path_profile
         - geotiff
@@ -1138,8 +1170,8 @@ components:
         - lte_mcs_feasibility
         - c2_pass_fail
         - c2_range_envelope
-        - drtk_pass_fail
-        - drtk_range_envelope
+        - rtk_pass_fail
+        - rtk_range_envelope
 
     MinFidelityCoverage:
       type: object
@@ -1182,10 +1214,10 @@ components:
         - { $ref: '#/components/schemas/Reference' }
         - { $ref: '#/components/schemas/AOIPack' }
 
-    MissionOrInline:
+    OperatingVolumeOrInline:
       oneOf:
         - { $ref: '#/components/schemas/Reference' }
-        - { $ref: '#/components/schemas/Mission' }
+        - { $ref: '#/components/schemas/OperatingVolume' }
 
     AnalysisCommon:
       type: object
@@ -1298,16 +1330,16 @@ components:
         - type: object
           required: [operation, tx_sites, rx_template, outputs]
           oneOf:
-            - { required: [mission] }
+            - { required: [operating_volume] }
             - { required: [aoi, alt_step_m] }
           properties:
-            operation:    { const: voxel }
+            operation:        { const: voxel }
             tx_sites:
               type: array
               minItems: 1
               items: { $ref: '#/components/schemas/TxSiteEntry' }
-            rx_template:  { $ref: '#/components/schemas/EquipmentOrInline' }
-            mission:      { $ref: '#/components/schemas/MissionOrInline' }
-            aoi:          { $ref: '#/components/schemas/AOIOrInline' }
-            resolution_m: { type: number, exclusiveMinimum: 0 }
-            alt_step_m:   { type: number, exclusiveMinimum: 0 }
+            rx_template:      { $ref: '#/components/schemas/EquipmentOrInline' }
+            operating_volume: { $ref: '#/components/schemas/OperatingVolumeOrInline' }
+            aoi:              { $ref: '#/components/schemas/AOIOrInline' }
+            resolution_m:     { type: number, exclusiveMinimum: 0 }
+            alt_step_m:       { type: number, exclusiveMinimum: 0 }

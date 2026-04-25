@@ -99,7 +99,13 @@
     },
 
     "Polarization":     { "type": "string", "enum": ["V", "H", "RHCP", "LHCP", "slant-45", "dual"] },
-    "LinkType":         { "type": "string", "enum": ["lora", "lte", "drone_c2", "drtk", "generic"] },
+    "LinkType": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Open string. `generic` is the only built-in core value; other values are registered by link-type plugins (spec §4.6). Bundled plugins ship `lora`, `lte`, `drone_c2`, `rtk`. Server returns LINK_TYPE_NOT_REGISTERED if the value is not registered.",
+      "examples": ["generic", "lora", "lte", "drone_c2", "rtk"]
+    },
     "FidelityTier":     { "type": "string", "enum": ["T0_FREE_SPACE", "T1_TERRAIN", "T2_TERRAIN_PLUS_CLUTTER", "T3_SURFACE", "T4_SURFACE_PLUS_BUILDINGS"] },
     "PropagationModel": { "type": "string", "enum": ["auto", "p1812", "p526", "itm", "p528", "p530", "friis", "two_ray"], "default": "auto" },
     "FadingModel":      { "type": "string", "enum": ["auto", "rayleigh", "rician", "lognormal"], "default": "auto" },
@@ -284,8 +290,9 @@
       "additionalProperties": false
     },
 
-    "InlineMission": {
+    "InlineOperatingVolume": {
       "type": "object",
+      "description": "A 3D region of interest for volumetric coverage analysis (spec §3.2). Drone flight envelope is the primary use case; also covers tower vertical-pattern surveys, tethered-balloon links, and any other case needing per-altitude evaluation.",
       "required": ["altitude_min_m_agl", "altitude_max_m_agl"],
       "oneOf": [
         { "required": ["bbox"] },
@@ -299,7 +306,8 @@
         "altitude_max_m_agl":    { "type": "number", "minimum": 0 },
         "altitude_step_m":       { "type": "number", "exclusiveMinimum": 0 },
         "duration_estimate_min": { "type": "number" },
-        "dock_site_ref":         { "$ref": "#/$defs/Reference" }
+        "home_site_ref":         { "$ref": "#/$defs/Reference", "description": "Return-to-home / launch-recovery anchor (drone-specific semantics)." },
+        "host_site_ref":         { "$ref": "#/$defs/Reference", "description": "Operational anchor for non-recovering deployments. Often the same Site as `home_site_ref`; sometimes different; either or both may be omitted." }
       },
       "additionalProperties": false
     },
@@ -327,23 +335,26 @@
       ]
     },
 
-    "RefOrInlineMission": {
+    "RefOrInlineOperatingVolume": {
       "oneOf": [
         { "$ref": "#/$defs/Reference" },
-        { "$ref": "#/$defs/InlineMission" }
+        { "$ref": "#/$defs/InlineOperatingVolume" }
       ]
     },
 
     "OutputKey": {
       "type": "string",
-      "enum": [
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Output artifact key. Core keys are universal (any operation: `link_budget`, `path_profile`, `geotiff`, `geotiff_stack`, `voxel`, `geojson_contours`, `kmz`, `png_with_worldfile`, `rendered_cross_section`, `stats`, `best_server_raster`, `fidelity_tier_raster`, `point_query`). Per-link-type semantic keys are declared by link-type plugins (spec §4.6) — bundled plugins contribute LoRa: `lora_snr_margin`, `lora_best_sf`, `lora_link_metrics`; LTE: `lte_rsrp`, `lte_rsrq`, `lte_sinr`, `lte_mcs_feasibility`; drone_c2: `c2_pass_fail`, `c2_range_envelope`; rtk: `rtk_pass_fail`, `rtk_range_envelope`. Server validates against the union of core keys and currently-registered plugin outputs.",
+      "examples": [
         "link_budget", "path_profile", "geotiff", "geotiff_stack", "voxel",
         "geojson_contours", "kmz", "png_with_worldfile", "rendered_cross_section",
         "stats", "best_server_raster", "fidelity_tier_raster", "point_query",
         "lora_snr_margin", "lora_best_sf", "lora_link_metrics",
         "lte_rsrp", "lte_rsrq", "lte_sinr", "lte_mcs_feasibility",
         "c2_pass_fail", "c2_range_envelope",
-        "drtk_pass_fail", "drtk_range_envelope"
+        "rtk_pass_fail", "rtk_range_envelope"
       ]
     },
 
@@ -490,7 +501,7 @@
       "allOf": [{ "$ref": "#/$defs/AnalysisCommon" }],
       "required": ["operation", "tx_sites", "rx_template", "outputs"],
       "oneOf": [
-        { "required": ["mission"] },
+        { "required": ["operating_volume"] },
         { "required": ["aoi", "alt_step_m"] }
       ],
       "properties": {
@@ -499,9 +510,9 @@
           "type": "array", "minItems": 1,
           "items": { "$ref": "#/$defs/TxSiteEntry" }
         },
-        "rx_template": { "$ref": "#/$defs/RefOrInlineEquipment" },
-        "mission":     { "$ref": "#/$defs/RefOrInlineMission" },
-        "aoi":         { "$ref": "#/$defs/RefOrInlineAOI" },
+        "rx_template":      { "$ref": "#/$defs/RefOrInlineEquipment" },
+        "operating_volume": { "$ref": "#/$defs/RefOrInlineOperatingVolume" },
+        "aoi":              { "$ref": "#/$defs/RefOrInlineAOI" },
         "resolution_m":{ "type": "number", "exclusiveMinimum": 0 },
         "alt_step_m":  { "type": "number", "exclusiveMinimum": 0 }
       }

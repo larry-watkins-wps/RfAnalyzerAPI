@@ -1,6 +1,6 @@
 # RfAnalyzer
 
-> Self-hosted, single-tenant API for RF propagation analysis used in wildlife-conservation deployments. Targets field engineers placing **DJI Docks**, **camera traps**, **LoRa gateways**, **D-RTK 3 relays**, and **LTE backhaul** in remote/protected areas.
+> Self-hosted, single-tenant API for RF propagation analysis. Targets field engineers placing **autonomous drone docks**, **sub-GHz IoT endpoints** (camera traps, fence/gate sensors, animal collars), **LoRa gateways**, **GNSS RTK base stations**, and **LTE backhaul** in remote/protected areas. Wildlife-protection deployments are the primary v1 driver; no spec primitive is wildlife- or vendor-specific.
 
 **Status:** Spec design phase (Draft v2 — pending user review). No implementation code yet. The design contract is complete and ready for implementation; this README is a guided tour of what's been specified.
 
@@ -35,7 +35,7 @@ Five analysis operations, all flowing through one pluggable model registry + 12-
 |---|---|---|---|
 | **A — point-to-point** | `POST /v1/analyses/p2p` | Will this specific link close? | [op-a-p2p.md](docs/superpowers/specs/examples/op-a-p2p.md) |
 | **B — area heatmap** | `POST /v1/analyses/area` | What's coverage from this Tx across this AOI? | [op-b-area.md](docs/superpowers/specs/examples/op-b-area.md) |
-| **C — multi-link site** | `POST /v1/analyses/multi_link` | Combined LoRa+LTE+drone-C2+D-RTK from one candidate dock? | [op-c-multi-link.md](docs/superpowers/specs/examples/op-c-multi-link.md) |
+| **C — multi-link site** | `POST /v1/analyses/multi_link` | Combined LoRa+LTE+drone-C2+RTK from one candidate site? | [op-c-multi-link.md](docs/superpowers/specs/examples/op-c-multi-link.md) |
 | **D — multi-Tx best-server** | `POST /v1/analyses/multi_tx` | Of these candidate sites, which dominates per pixel? | [op-d-multi-tx.md](docs/superpowers/specs/examples/op-d-multi-tx.md) |
 | **E — 3D / volumetric** | `POST /v1/analyses/voxel` | Coverage across a drone flight envelope (lat × lon × altitude)? | [op-e-voxel.md](docs/superpowers/specs/examples/op-e-voxel.md) |
 
@@ -48,7 +48,7 @@ The engine ships seven plug-in models — **ITU-R P.1812**, **ITM/Longley-Rice**
 Five tiers from `T0_FREE_SPACE` (sanity bound) to `T4_SURFACE_PLUS_BUILDINGS` (DSM + per-building loss). Each Run reports four tier values: `dominant`, `min`, `max`, and `max_possible` — the last is the best the AOI's data could support, regardless of what the run used. A run completes as `PARTIAL` rather than `COMPLETED` when fidelity is below the AOI's max possible (the engineer learns "I could have gotten more"). Callers may specify `min_fidelity_tier` (per-pixel floor) or `min_fidelity_coverage: {tier, fraction}` (coverage floor).
 
 ### Catalog with sharing and versioning (spec §3.1 – §3.2)
-Nine first-class entity types — Site, Antenna, RadioProfile, EquipmentProfile, AOIPack, ClutterTable, Mission, MeasurementSet, Comparison — plus a content-addressed Asset model. Each entity is named, versioned, optionally shared within the tenant. References use `{ref, owner, version}` with `version: int | "latest"`; cross-key references are not supported.
+Nine first-class entity types — Site, Antenna, RadioProfile, EquipmentProfile, AOIPack, ClutterTable, OperatingVolume, MeasurementSet, Comparison — plus a content-addressed Asset model. Each entity is named, versioned, optionally shared within the tenant. References use `{ref, owner, version}` with `version: int | "latest"`; cross-key references are not supported.
 
 A reference graph (mermaid ER diagram) lives in spec §3.6.
 
@@ -138,7 +138,8 @@ See [CLAUDE.md](CLAUDE.md) for working agreements with AI assistants.
 | Adaptive fidelity tiers (T0–T4); floors and coverage | §5.4 |
 | Coordinate systems and projections; BYO validation | §5.5 – §5.6 |
 | Output artifacts: canonical vs derivative | §6.1 |
-| Link-type semantic outputs (LoRa/LTE/drone-C2/D-RTK) | §6.2 |
+| Link-type plugin contract (open LinkType, bundled plugins) | §4.6 |
+| Link-type semantic outputs (LoRa/LTE/drone-C2/RTK) | §6.2 |
 | Color mapping; point queries | §6.3 – §6.4 |
 | Multi-link Op C aggregation | §6.5 |
 | Voxel slicing | §6.6 |

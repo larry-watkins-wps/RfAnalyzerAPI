@@ -2,7 +2,7 @@
 
 Companion to spec §4.0 (Op E), §6.1 (voxel canonical), §6.6 (slicing).
 
-**Scenario.** A DJI dock will fly drones over a 6 km × 6 km flight envelope at altitudes 60–120 m AGL. Will the 2.4 GHz C2 link close everywhere across that volume?
+**Scenario.** An autonomous drone dock (DJI Dock 2 in this deployment) will fly drones over a 6 km × 6 km flight envelope at altitudes 60–120 m AGL. Will the 2.4 GHz C2 link close everywhere across that volume?
 
 ## Request
 
@@ -15,7 +15,7 @@ Companion to spec §4.0 (Op E), §6.1 (voxel canonical), §6.6 (slicing).
     { "site": { "ref": "olifants-dock" }, "equipment": { "ref": "dji-dock-2-c2-2_4ghz", "owner": "shared" } }
   ],
   "rx_template":      { "ref": "drone-rc-2_4ghz-omni", "owner": "shared" },
-  "mission":          { "ref": "olifants-flight-envelope-2026q1" },
+  "operating_volume": { "ref": "olifants-flight-envelope-2026q1" },
   "resolution_m":     30,
   "alt_step_m":       15,
   "outputs":          ["voxel", "c2_pass_fail", "c2_range_envelope", "stats"],
@@ -25,7 +25,7 @@ Companion to spec §4.0 (Op E), §6.1 (voxel canonical), §6.6 (slicing).
 }
 ```
 
-`mission` is a Reference; alternatively the caller could inline `{ bbox, polygon, altitude_min_m_agl, altitude_max_m_agl, altitude_step_m }`. The Mission's altitude range × `alt_step_m` define the voxel's altitude axis.
+`operating_volume` is a Reference; alternatively the caller could inline `{ bbox, polygon, altitude_min_m_agl, altitude_max_m_agl, altitude_step_m, home_site_ref? }`. The Operating Volume's altitude range × `alt_step_m` define the voxel's altitude axis. (`home_site_ref` is optional; here `olifants-flight-envelope-2026q1` already pins the dock as its home Site.)
 
 `min_fidelity_tier: T3_SURFACE` requires the AOI Pack to include DSM; if it doesn't, the run fails fast with `FIDELITY_FLOOR_NOT_MET` (§5.4).
 

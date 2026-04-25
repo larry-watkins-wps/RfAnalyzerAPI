@@ -1,6 +1,6 @@
 # RfAnalyzer
 
-Self-hosted, single-tenant API for RF propagation analysis used in wildlife conservation deployments. Targets field engineers placing DJI Docks, camera traps, LoRa gateways, D-RTK 3 relays, and LTE backhaul in remote/protected areas.
+Self-hosted, single-tenant API for RF propagation analysis. Targets field engineers placing autonomous drone docks, sub-GHz IoT endpoints (camera traps, fence/gate sensors, animal collars), LoRa gateways, GNSS RTK base stations, and LTE backhaul in remote/protected areas. Wildlife-protection deployments are the primary v1 driver; no spec primitive is wildlife- or vendor-specific. Vendor-specific gear (e.g., DJI Dock 2, DJI D-RTK 3) lives only as seed Equipment Profiles built on the generic catalog primitives.
 
 ## Current state
 
@@ -14,7 +14,7 @@ Self-hosted, single-tenant API for RF propagation analysis used in wildlife cons
 
 ## Architecture
 
-- Pluggable model registry + pipeline-stage engine, 12 stages (§4.1).
+- Pluggable propagation-model registry + pluggable link-type registry + pipeline-stage engine, 12 stages (§4.1, §4.2, §4.6). `link_type` is an open string; `generic` is core, other values come from link-type plugins (bundled: `lora`, `lte`, `drone_c2`, `rtk`).
 - Five analysis ops: point-to-point, area, multi-link, multi-Tx, voxel (§4.0).
 - Adaptive geo-data fidelity, five tiers from free-space to DSM+buildings (§5.4).
 - Content-addressed assets (`sha256:` prefix) for binary blobs; reference-counted lifecycle (§3.5).

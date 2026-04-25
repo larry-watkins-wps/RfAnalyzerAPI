@@ -342,6 +342,60 @@
       ]
     },
 
+    "LicenseClass": {
+      "type": "string",
+      "enum": ["license_exempt", "license_required", "permit_required", "prohibited"],
+      "description": "Per-band license class (spec §3.7)."
+    },
+
+    "RegulatoryBand": {
+      "type": "object",
+      "required": ["min_mhz", "max_mhz", "max_eirp_dbm", "license_class"],
+      "properties": {
+        "name":               { "type": "string" },
+        "min_mhz":            { "type": "number", "exclusiveMinimum": 0 },
+        "max_mhz":            { "type": "number", "exclusiveMinimum": 0 },
+        "link_type_hint":     { "$ref": "#/$defs/LinkType" },
+        "max_eirp_dbm":       { "type": "number" },
+        "duty_cycle_pct_max": { "type": "number", "minimum": 0, "maximum": 100 },
+        "bandwidth_khz_max":  { "type": "number", "exclusiveMinimum": 0 },
+        "license_class":      { "$ref": "#/$defs/LicenseClass" },
+        "notes":              { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "InlineRegulatoryProfile": {
+      "type": "object",
+      "description": "Inline regulatory profile (spec §3.7). Operator-curated; advisory only.",
+      "required": ["country_code", "regulator", "bands"],
+      "properties": {
+        "name":                    { "type": "string" },
+        "country_code":            { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "regulator":               { "type": "string" },
+        "bands":                   { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/RegulatoryBand" } },
+        "effective_date":          { "type": "string", "format": "date" },
+        "superseded_at":           { "type": "string", "format": "date" },
+        "regulator_url":           { "type": "string", "format": "uri" },
+        "reference_doc_asset_ref": { "$ref": "#/$defs/AssetId" },
+        "notes":                   { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "RefOrInlineRegulatoryProfile": {
+      "oneOf": [
+        { "$ref": "#/$defs/Reference" },
+        { "$ref": "#/$defs/InlineRegulatoryProfile" }
+      ]
+    },
+
+    "SensitivityClass": {
+      "type": "string",
+      "enum": ["public", "org_internal", "location_redacted", "restricted_species"],
+      "description": "Operational sensitivity (Appendix E). May be auto-promoted at submission when geometry intersects a configured restricted-species polygon (warning OPSEC_AUTO_CLASSIFIED)."
+    },
+
     "OutputKey": {
       "type": "string",
       "minLength": 1,
@@ -360,7 +414,7 @@
 
     "AnalysisCommon": {
       "type": "object",
-      "description": "Fields shared by every analysis request body. Spec §2.3 (mode, idempotency, dedupe, webhook), §5.4 (fidelity floors), §6 (outputs, color_map, contour_levels_db), §7.3 (measurement_set_refs, freq_tolerance_mhz).",
+      "description": "Fields shared by every analysis request body. Spec §2.3 (mode, idempotency, dedupe, webhook), §3.7 (regulatory_profile_ref, enforce_regulatory), §5.4 (fidelity floors), §6 (outputs, color_map, contour_levels_db), §7.3 (measurement_set_refs, freq_tolerance_mhz), Appendix E (sensitivity_class).",
       "properties": {
         "outputs":                { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/OutputKey" } },
         "mode":                   { "$ref": "#/$defs/Mode" },
@@ -383,7 +437,10 @@
         "point_query_locations": {
           "type": "array",
           "items": { "$ref": "#/$defs/LatLonAlt" }
-        }
+        },
+        "regulatory_profile_ref": { "$ref": "#/$defs/RefOrInlineRegulatoryProfile" },
+        "enforce_regulatory":     { "type": "boolean", "default": false, "description": "When true, regulatory band/EIRP violations promote from warnings to errors. License notices remain advisory either way (spec §3.7)." },
+        "sensitivity_class":      { "$ref": "#/$defs/SensitivityClass" }
       }
     },
 

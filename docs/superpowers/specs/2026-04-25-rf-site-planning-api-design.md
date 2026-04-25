@@ -150,6 +150,7 @@ sequenceDiagram
 - **Registration challenge.** First time a `webhook_url` is seen for a tenant, the orchestrator POSTs `{challenge: <random>}` and requires the URL to echo it back within 5 seconds. URLs that fail challenge are rejected. Subsequent submissions to a verified URL skip the challenge for `webhook_verification_ttl_days` (default **30**).
 - **Secret rotation.** `POST /v1/webhooks/secrets:rotate` produces a new secret. Both old and new are accepted for **24 h** so receivers can roll over without downtime.
 - Delivery retried with exponential backoff on non-2xx for a bounded window (default 6 attempts over 1 hour).
+- **Sensitivity-class gating.** Webhook delivery for runs at `restricted_species` requires the target URL to be on the deployment's `opsec_authorized` allowlist (Appendix E.2). Webhooks for `location_redacted` runs deliver normally, but per-artifact URLs in the payload serve redacted variants per Appendix E.2.
 
 ### 2.5 Endpoint inventory
 
@@ -165,6 +166,7 @@ sequenceDiagram
 | `POST` `GET` `PATCH` `DELETE` | `/v1/measurements` (and `/{id}`) | sync | `measurements.*` |
 | `POST` | `/v1/measurements/{id}:append` | sync | `measurements.write` |
 | `POST` `GET` `PATCH` `DELETE` | `/v1/comparisons` (and `/{id}`) | sync | `catalog.*` |
+| `POST` `GET` `PATCH` `DELETE` | `/v1/regulatory-profiles` (and `/{id}`) | sync | `catalog.*` |
 | `POST` | `/v1/assets:initiate` | sync | `catalog.write` |
 | `POST` | `/v1/assets/{id}:complete` | sync | `catalog.write` |
 | `POST` | `/v1/assets/{id}:abort` | sync | `catalog.write` |
@@ -202,7 +204,7 @@ sequenceDiagram
 - **Soft delete:** deletes mark records hidden but do not break runs that reference them. Soft-deleted shared entities are hidden from list endpoints and return `404` on `GET` by name; resolution by stable internal ID continues to work for in-flight runs and historical `inputs_resolved`. Hard delete only via explicit purge.
 - **Tags:** free-form tags on Site, AOI Pack, Equipment Profile, Operating Volume, Comparison.
 
-### 3.2 First-class entities (9 total)
+### 3.2 First-class entities (10 total)
 
 | Entity | Required fields | Notable optional fields | Purpose |
 |---|---|---|---|
@@ -213,8 +215,9 @@ sequenceDiagram
 | **AOI Pack** | `name`, `bbox` (south, west, north, east) | `dtm_ref`, `dsm_ref`, `clutter_ref`, `buildings_ref`, `clutter_table_ref`, `source` (bundled / byo / fetched), per-layer `upstream_source`, `upstream_version`, `acquired_at`, `content_sha256`, `resolution_m`, `notes` | Region with attached geo-data layers. Per-layer provenance fields (§5.3). |
 | **ClutterTable** | `name`, `taxonomy_id`, `class_table` (mapping class_id → per-band attenuation in dB) | `depolarization_factor_per_class` (mapping class_id → `d ∈ [0, 1]`), `notes`, `applicable_freq_bands` | Per-class attenuation table; depolarization factor consumed by polarization mismatch (§4.5). |
 | **Operating Volume** | `name`, `bbox` *or* `polygon`, `altitude_min_m_agl`, `altitude_max_m_agl` | `altitude_step_m`, `duration_estimate_min`, `home_site_ref`, `host_site_ref`, `notes` | A 3D region of interest for volumetric coverage analysis. Drone-flight-envelope is the primary use case (Op E with `home_site_ref` pointing at the drone dock or launch site); also covers tower vertical-pattern surveys, tethered-balloon links, and any other case needing per-altitude evaluation. `home_site_ref` names a return-to-home / launch-recovery anchor (drone-specific semantics). `host_site_ref` names the operational anchor for non-recovering deployments. Both are optional and orthogonal — typically the same Site, sometimes different, sometimes neither. |
-| **Measurement Set** | `name`, `points[]` where each `= {lat, lon, alt_m_agl, freq_mhz, observed_signal_dbm, observed_metric, timestamp, source}` | `ordered: bool` (default `false`; tracks set this `true`), per-point `seq: int` (when `ordered`), `device_ref`, `site_ref` *or* `aoi_ref`, `notes`, per-point `bandwidth_khz`, `uncertainty_db`, `tags` | Stored field RSSI/RSRP observations. A point cloud (camera traps) by default; tracks set `ordered: true` and supply `seq` per point. |
+| **Measurement Set** | `name`, `points[]` where each `= {lat, lon, alt_m_agl, freq_mhz, observed_signal_dbm, observed_metric, timestamp, source}` | `ordered: bool` (default `false`; tracks set this `true`), per-point `seq: int` (when `ordered`), `device_ref`, `site_ref` *or* `aoi_ref`, `sensitivity_class` (Appendix E), `notes`, per-point `bandwidth_khz`, `uncertainty_db`, `tags` | Stored field RSSI/RSRP observations. A point cloud (camera traps) by default; tracks set `ordered: true` and supply `seq` per point. |
 | **Comparison / Plan** | `name`, `run_ids[]` | `notes`, `winner_run_id`, `decision_rationale`, `decided_at` | Captures a real placement decision with the runs that informed it. |
+| **Regulatory Profile** | `name`, `country_code` (ISO-3166-1 alpha-2), `regulator`, `bands[]` (each `min_mhz`, `max_mhz`, `max_eirp_dbm`, `license_class ∈ {license_exempt, license_required, permit_required, prohibited}`) | per-band `link_type_hint`, `duty_cycle_pct_max`, `bandwidth_khz_max`, `notes`; profile-level `effective_date`, `superseded_at`, `regulator_url`, `reference_doc_asset_ref`, `notes` | Per-jurisdiction band/EIRP/license-class constraints. Referenced from analysis requests via `regulatory_profile_ref`; the engine validates each Tx's effective EIRP and frequency against the matching band at Stage 2 (§4.1) and emits `REGULATORY_*` codes per the request's `enforce_regulatory` flag (§3.7, Appendix D). **Advisory only — does not constitute licensing advice (§1 out of scope).** |
 
 ### 3.3 Run record (separate, immutable)
 
@@ -233,6 +236,8 @@ A Run is a first-class persisted record but not a catalog entity (no name-based 
 - `cancellation_reason` (`user` | `expired` | `sync_budget_exceeded` | null)
 - `comparison_id` (if part of one)
 - `replay_of_run_id` (if produced via the replay endpoint), `replay_engine_major_drift` (if cross-major)
+- `sensitivity_class` (Appendix E) — `public` | `org_internal` | `location_redacted` | `restricted_species`. Defaults to the deployment's configured default class (typically `org_internal`). May be auto-promoted; see Appendix E.
+- `regulatory_profile_ref_resolved` — convenience pointer into `inputs_resolved` if a regulatory profile was supplied; null otherwise.
 
 ### 3.4 Standard profile library
 
@@ -386,7 +391,26 @@ erDiagram
     Run                }o..o{ AOIPack          : "snapshot in inputs_resolved"
     Run                }o..o{ OperatingVolume  : "snapshot in inputs_resolved"
     Run                }o..o{ MeasurementSet   : "snapshot in inputs_resolved"
+    Run                }o..o| RegulatoryProfile: "snapshot in inputs_resolved"
+
+    RegulatoryProfile  }o--o| Asset            : "reference_doc_asset_ref"
 ```
+
+### 3.7 Regulatory Profile semantics
+
+Wildlife corridors and conservation deployments routinely cross national borders (KAZA: 5 countries; Greater Limpopo: 3). The `regulatory_profile` catalog entity captures per-jurisdiction band rules so the engine can flag deployments that would breach EIRP caps, fall outside coordinated bands, or require licensing the operator did not anticipate. The system **does not** issue licenses, advise on compliance, or replace legal counsel — it surfaces technically-detectable conflicts against operator-supplied rule sets (consistent with the §1 scope exclusion of regulatory licensing tooling).
+
+**Lookup at Stage 2.** When an analysis request includes `regulatory_profile_ref`, the engine runs an additional validation pass during pipeline stage 2 (§4.1) for every Tx in the resolved input set:
+
+1. **Band match.** Find the band in `regulatory_profile.bands[]` whose `[min_mhz, max_mhz]` covers the Tx Radio Profile's `freq_mhz`. If no band matches, emit `REGULATORY_BAND_UNCOVERED_ADVISORY` (warning) or `REGULATORY_BAND_UNCOVERED` (error, only if `enforce_regulatory: true`).
+2. **EIRP check.** Compute the Tx's effective EIRP as `tx_power_dbm + tx_antenna.gain_dbi - tx_cable_loss_db` evaluated at the Tx Radio Profile's center frequency. If `effective_eirp_dbm > band.max_eirp_dbm`, emit `REGULATORY_LIMIT_ADVISORY` (warning) or `REGULATORY_LIMIT_EXCEEDED` (error, only if `enforce_regulatory: true`). The same code applies to `bandwidth_khz_max` and `duty_cycle_pct_max` overruns when the Radio Profile carries the corresponding declarations; missing declarations on the Radio Profile do not raise codes (the engine cannot infer duty cycle from waveform alone).
+3. **License notice.** If `band.license_class != license_exempt`, emit `REGULATORY_LICENSE_NOTICE` regardless of `enforce_regulatory`. License-class is paperwork, not a technical RF condition; the run is never blocked on this alone.
+
+**Enforcement flag.** Analysis requests may include `enforce_regulatory: true` (default `false`). When `true`, technical violations promote from warnings on a `PARTIAL` run to errors that fail the run at Stage 2. License notices remain advisory in either mode.
+
+**Advisory disclaimer.** Regulatory profiles are **operator-curated** rule sets. The system ships an empty regulatory catalog by default — the standard profile library does **not** contain government-issued or vendor-issued regulatory profiles, because those change frequently and authoritative interpretation belongs with the deployment operator. Operators are responsible for the accuracy of any `regulatory_profile` they create. No `REGULATORY_*` code constitutes a representation of legal compliance.
+
+**Versioning and replay.** Regulatory Profiles version on edit (per §3.1). Runs snapshot the resolved profile into `inputs_resolved` so a replayed run reproduces the same regulatory verdict even if the catalog entry has been updated. A `REGULATORY_*` code raised on the original run will be raised again on byte-identical replay.
 
 ---
 
@@ -415,7 +439,7 @@ Coordinates may be inlined in place of a Site reference (per §2.3 reference sha
 Every analysis flows through a subset of these stages, in order:
 
 1. **Resolve inputs.** Replace every catalog reference with a fully-inlined object, version-pinned. Snapshot becomes `Run.inputs_resolved`; `inputs_resolved_at` is stamped.
-2. **Validate compatibility.** Frequency authority (§4.0), antenna applicable_bands (§3.2), polarization vs. radio band, AOI bounds vs. site location, mission altitudes vs. radio link type, etc.
+2. **Validate compatibility.** Frequency authority (§4.0), antenna applicable_bands (§3.2), polarization vs. radio band, AOI bounds vs. site location, mission altitudes vs. radio link type, regulatory band/EIRP/license checks if `regulatory_profile_ref` was supplied (§3.7), etc.
 3. **Plan geometry samples.** The operation-specific sampler emits the set of (Tx, Rx) sample pairs:
    - **Op A (point-to-point):** 1 pair.
    - **Op B (area):** 1 Tx × N Rx (grid over AOI at sensor altitude).
@@ -755,7 +779,7 @@ The `max_possible` comparison is what surfaces "you could have gotten more from 
 
 ## 6. Output Artifacts & Link-Type Semantics
 
-The output system is **client-driven shaping** — the engine emits exactly what each request declares it wants — combined with a **canonical-vs-derivative** split that controls storage cost (§8.2).
+The output system is **client-driven shaping** — the engine emits exactly what each request declares it wants — combined with a **canonical-vs-derivative** split that controls storage cost (§8.2). Every artifact is additionally shaped by the Run's operational sensitivity class at response time (Appendix E.2): unauthorized callers receive redacted or blurred variants of `location_redacted` artifacts and `403` for `restricted_species` artifacts.
 
 ### 6.1 Universal artifacts
 
@@ -879,6 +903,8 @@ A set of observations:
 {
   name, owner_api_key, share, version,
   ordered: bool,                    # default false; true → tracks
+  sensitivity_class,                # Appendix E; runs that attach this set
+                                    # take the max of their own class and this
   site_ref (optional) | aoi_ref (optional),
   device_ref (optional),
   notes,
@@ -1018,6 +1044,34 @@ Per-class TTLs replace a single flat retention. Each TTL is deployment-configura
 | Idempotency keys | 7 d | — | re-submit window |
 | Asset orphans | 7 d | — | no inbound references |
 
+The class horizons and the pin override visualized:
+
+```mermaid
+flowchart LR
+    T0([t = 0<br/>Run reaches terminal state<br/>artifacts materialized])
+
+    T0 --> T24[t = 24 h<br/>derivative cache TTL]
+    T24 --> KEEP_DER[Derivatives regenerable on demand<br/>via :rederive / :materialize<br/>from persisted canonicals §6.7]
+
+    T0 --> T7[t = 7 d<br/>voxel canonical TTL]
+    T7 --> Q7{Pinned or<br/>Comparison-attached?}
+    Q7 -- no --> GC_VOX[/voxel garbage-collected/]
+    Q7 -- yes --> KEEP_VOX[voxel retained until unpin]
+
+    T0 --> T30[t = 30 d<br/>2D raster canonical TTL<br/>geotiff · best_server · fidelity_tier]
+    T30 --> Q30{Pinned or<br/>Comparison-attached?}
+    Q30 -- no --> GC_2D[/2D rasters garbage-collected/]
+    Q30 -- yes --> KEEP_2D[2D rasters retained until unpin]
+
+    T0 --> TI[t → ∞]
+    TI --> KEEP_RUN[Run record + JSON canonicals<br/>link_budget · stats · path_profile · point_query<br/>+ link-type metric JSON<br/>retained indefinitely]
+
+    classDef gc fill:#fee2e2,stroke:#b91c1c;
+    classDef keep fill:#dcfce7,stroke:#16a34a;
+    class GC_VOX,GC_2D gc;
+    class KEEP_DER,KEEP_VOX,KEEP_2D,KEEP_RUN keep;
+```
+
 **Pinning.** `POST /v1/runs/{id}/pin` and `…/unpin` set/clear the pin flag. Pinned runs' canonical artifacts never expire; derivatives still cap at 24 h (regenerable from the pinned canonicals at any time).
 
 **Comparison auto-pin.** A Run referenced by a Comparison/Plan is automatically pinned for as long as that Comparison exists.
@@ -1052,7 +1106,10 @@ Principal {
   scopes: list[str]            # catalog.read, catalog.write,
                                # runs.submit, runs.read, runs.write,
                                # runs.cancel, measurements.read,
-                               # measurements.write, admin
+                               # measurements.write, admin,
+                               # opsec.read_location_redacted,
+                               # opsec.read_restricted_species
+                               # (Appendix E.5)
   rate_limit_class: str        # selects bucket sizes
   storage_class: str           # selects storage quota
 }
@@ -1084,6 +1141,7 @@ When deployed via the bundled Docker Compose stack on a single machine:
 - **Metrics** (Prometheus-style exposition): runs by status/operation, queue depth, worker stage timings, artifact-store bytes, GC sweep stats.
 - **Per-run trace** retrievable via the run record: stage timings, model selected, fidelity tier, data layers loaded, warnings.
 - **Health endpoints:** `/healthz` (process liveness), `/readyz` (dependencies reachable: DB, queue, artifact store, geo data).
+- **Audit-log redaction.** Per-Run `sensitivity_class` controls audit-log visibility for non-admin keys (Appendix E.2). Operators administering a deployment use admin-scope keys to view full audit data; routine consumers see redaction consistent with the response surface.
 
 ### 8.7 Engine version & change management
 
@@ -1241,6 +1299,9 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 | `BYO_LAYER_VALIDATION_FAILED` | Caller-uploaded raster/vector failed CRS / extent / datatype checks. |
 | `VOXEL_NOT_AVAILABLE` | Slice request against a Run that did not produce a `voxel` canonical. |
 | `REPLAY_ACROSS_ENGINE_MAJOR` | Replay would cross an engine major boundary; set `force_replay_across_major: true` to override. |
+| `REGULATORY_LIMIT_EXCEEDED` | A Tx's effective EIRP, declared duty cycle, or declared bandwidth exceeds the matching band's cap in the resolved `regulatory_profile_ref`, AND the request set `enforce_regulatory: true`. (§3.7) |
+| `REGULATORY_BAND_UNCOVERED` | A Tx's frequency lies outside every band in the resolved `regulatory_profile_ref`, AND the request set `enforce_regulatory: true`. (§3.7) |
+| `OPSEC_CLASSIFICATION_REQUIRED` | The resolved geometry intersects a configured `restricted_species` polygon and the deployment's policy requires explicit `sensitivity_class` declaration on submission. (Appendix E) |
 
 ### Warnings (run succeeds, possibly PARTIAL)
 
@@ -1253,6 +1314,11 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 | `DSM_GAP` | DSM coverage incomplete; pixels at which DSM was missing fell back to DTM. |
 | `FETCHED_LAYER_PARTIAL` | AOI Pack created with one or more upstream-fetched layers failing. |
 | `RESOLUTION_EXCEEDS_DATA` | Requested output raster resolution finer than underlying data resolution. |
+| `REGULATORY_LIMIT_ADVISORY` | Same condition as `REGULATORY_LIMIT_EXCEEDED` but `enforce_regulatory: false` (default); advisory only. (§3.7) |
+| `REGULATORY_BAND_UNCOVERED_ADVISORY` | Same condition as `REGULATORY_BAND_UNCOVERED` but `enforce_regulatory: false` (default); advisory only. (§3.7) |
+| `REGULATORY_LICENSE_NOTICE` | Matched regulatory band has `license_class != license_exempt`. Always advisory regardless of `enforce_regulatory`. (§3.7) |
+| `OPSEC_AUTO_CLASSIFIED` | Submission was auto-classified to a higher `sensitivity_class` than declared (e.g., AOI intersected a `restricted_species` polygon). The Run record carries the auto-applied class; subsequent artifacts redact accordingly. (Appendix E) |
+| `OPSEC_REDACTION_APPLIED` | Returned artifact set has been redacted per the Run's `sensitivity_class`. The warning's `detail` lists the redacted artifact keys. (Appendix E) |
 
 ### Filter reasons (informational, on PvO and grid sampling)
 
@@ -1261,6 +1327,103 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 | `OBSERVED_METRIC_MISMATCH` | Observation's `observed_metric` not in the link_type's accepted set. |
 | `OBSERVATION_OUT_OF_GEOMETRY` | Observation location outside analyzed geometry. |
 | `OBSERVATION_OUT_OF_FREQ_TOLERANCE` | Observation frequency outside `freq_tolerance_mhz`. |
+
+---
+
+## Appendix E — Operational Sensitivity & Redaction
+
+Conservation deployments routinely produce artifacts whose disclosure carries real-world risk: a geotiff revealing a rhino dehorning site, a KMZ overlay tracing an anti-poaching drone patrol route, a link-budget JSON listing the precise frequency of a collared elephant. This appendix defines the four-class operational-sensitivity model the engine uses to control who sees what, what gets redacted in artifacts and webhooks, and how submissions are auto-classified at risk-prone geometries.
+
+**Scope.** The model is a deployment-side access-control overlay on top of the existing per-tenant `share = private | shared` flag (§3.1). It does **not** replace authentication, authorization, or audit; it sharpens what each authorized caller sees once authentication has succeeded. It does not encrypt artifact bytes — encryption at rest is a deployment concern outside the API contract.
+
+### E.1 Classification levels
+
+| Level | Default visibility | Typical use |
+|---|---|---|
+| `public` | Any tenant key. | Synthetic / demo / training runs. Test data. Material the organization is comfortable publishing externally. |
+| `org_internal` | Any tenant key. **Default for new submissions** unless deployment overrides. | Routine site planning. Coverage studies that don't expose sensitive species or active operations. |
+| `location_redacted` | Any tenant key sees the Run, but coordinate-bearing fields are spatially obfuscated. Full precision served only to keys with scope `opsec.read_location_redacted`. | Sensitive-but-not-restricted: ranger camp coordinates, fence-sensor placements along a known poaching corridor, camera-trap mesh in a zone with seasonal sensitive activity. |
+| `restricted_species` | Run invisible to non-authorized keys (returns `404` even on `share = shared`). Artifact endpoints return `403`. Audit log entry visible only to admin keys. Webhook delivery requires an allowlisted, `opsec_authorized: true` URL. Full data served only to keys with scope `opsec.read_restricted_species`. | Rhino dehorning sites; specific collared individuals; current anti-poaching response geometries; any AOI overlapping a configured `restricted_species` polygon (§E.4). |
+
+**Class is set per Run, not per artifact.** Every artifact a Run emits inherits the Run's class. Re-derivations and slice exports inherit from the parent Run.
+
+### E.2 Per-class redaction contract
+
+Redaction applies only to responses returned to non-authorized callers (callers without the matching `opsec.read_*` scope). Stored bytes remain at full precision; redaction is computed at response time from the canonicals, mirroring the canonical-vs-derivative split (§6).
+
+| Surface | `org_internal` | `location_redacted` (unauthorized caller) | `restricted_species` (unauthorized caller) |
+|---|---|---|---|
+| `GET /v1/runs/{id}` | Full Run record. | `inputs_resolved.*.lat`/`lon` snapped to a configurable grid (default ~1 km); AOI bbox snapped to ~5 km grid; `tx_site.name` and `rx_site.name` returned as `[redacted]`. | `404 NOT_FOUND` regardless of `share`. |
+| `link_budget` JSON | Full. | `geometry.distance_km` rounded to nearest 0.5; `geometry.bearing_deg` rounded to nearest 5°; site names redacted. | `403 FORBIDDEN`. |
+| `path_profile` | Full. | Omitted from response (canonical retained server-side). | `403 FORBIDDEN`. |
+| `geotiff` / `geotiff_stack` / `voxel` | Full. | Served only as a re-derived **blurred** raster (Gaussian-equivalent at the redaction-grid cell size); original canonical not exposed. | `403 FORBIDDEN`. |
+| `geojson_contours` / `kmz` / `png_with_worldfile` / `rendered_cross_section` | Full. | Re-derived from the blurred geotiff; coordinate precision in vector geometries snapped to redaction grid. | `403 FORBIDDEN`. |
+| `point_query` | Full. | Locations snapped to redaction grid; per-point received-power retained. | `403 FORBIDDEN`. |
+| `best_server_raster` | Full. | Served blurred; sidecar JSON's `tx_site.name` redacted to anonymized labels (`A`, `B`, …). | `403 FORBIDDEN`. |
+| `stats` | Full. | Full (no spatial detail to redact). | `403 FORBIDDEN`. |
+| Webhook payload (§2.4) | Full. | `artifacts_url` retained; per-artifact URLs serve blurred / redacted variants per the rules above. | Webhook **not delivered** unless target URL is on the deployment's `opsec_authorized` allowlist. |
+| Audit log (§8.6) | Full. | `inputs_resolved` digest retained; coordinate fields redacted to country code. | Visible only to admin-scope keys; other keys see entry as `[REDACTED restricted_species run]` with no payload. |
+
+**Re-derivation under redaction.** A `:rederive` request from an unauthorized caller against a `location_redacted` Run produces a derivative of the **blurred** canonical, not the underlying full-precision canonical. The 24-hour cache keys redaction state alongside the parameters — an authorized caller asking for the same derivative gets a separate cache entry served from full-precision data.
+
+### E.3 Submission-time classification
+
+**Default class.** Each deployment configures `default_sensitivity_class` (one of the four). Submissions inherit this default if `sensitivity_class` is omitted from the analysis request.
+
+**Caller-declared class.** Any key may set `sensitivity_class` to a level **at or above** the deployment default. Setting it below the default is rejected with `403`. Setting it above the default (e.g., a routine submission marked `restricted_species`) is always allowed — over-classification is a safe operation.
+
+**Auto-classification.** When the deployment has configured one or more `restricted_species_polygons` (a list of geographic polygons stored as a deployment-level config, not a catalog entity), the orchestrator at SUBMITTED time tests whether the resolved analysis geometry intersects any of them:
+
+- The geometry tested is the union of: every `tx_site` / `rx_site` point, the AOI Pack bbox if any, the Operating Volume bbox if any, and the analysis grid for Ops B/C/D/E.
+- If any intersection is non-empty, the Run's `sensitivity_class` is auto-promoted to `restricted_species` regardless of the caller's declaration. Warning `OPSEC_AUTO_CLASSIFIED` is recorded on the Run; the response surfaces the auto-promoted class so the caller can react.
+
+**Strict-classification mode.** Deployments may set `require_explicit_classification_in_polygon: true`. In that mode, submissions whose geometry intersects a `restricted_species` polygon **must** declare `sensitivity_class: restricted_species` explicitly. Submissions that do not are rejected at SUBMITTED with `OPSEC_CLASSIFICATION_REQUIRED`. Auto-promotion still applies to over-broad declarations (e.g., declaring `org_internal` returns the error; declaring `location_redacted` is also rejected — the explicit value must be `restricted_species`).
+
+### E.4 Restricted-species polygons
+
+Configured at deployment time (not via the public API; these are policy data, not user data):
+
+```
+restricted_species_polygons: [
+  {
+    id:           str,                   # opaque, e.g., "rhino-zone-mfolozi"
+    polygon:      GeoJSON Polygon,
+    species_code: str (optional),        # IUCN-style code or org-internal
+    notes:        str (optional),
+    effective_from: RFC3339 (optional),
+    effective_to:   RFC3339 (optional)
+  },
+  ...
+]
+```
+
+Polygons are evaluated by the orchestrator only; they are **never returned** in any API response. Their ids may appear in audit logs visible to admin keys but are otherwise not surfaced.
+
+### E.5 Authorization
+
+Two new auth scopes (extending the §8.4 list):
+
+- `opsec.read_location_redacted` — caller sees full-precision data on `location_redacted` runs.
+- `opsec.read_restricted_species` — caller sees full data on `restricted_species` runs and is allowed to submit runs with explicit `sensitivity_class: restricted_species`. Implies `opsec.read_location_redacted`.
+
+A key without `opsec.read_restricted_species` cannot **submit** a `restricted_species` run; the submission is rejected with `403`. This is intentional — the authoritative classification of a sensitive operation should be made by a key the operator has cleared for that work.
+
+### E.6 Replay and reclassification
+
+- **Default.** Replay (`POST /v1/runs/{id}/replay`) carries the original Run's `sensitivity_class` even if the deployment's `restricted_species_polygons` have since changed. The replay is a reproduction; its sensitivity is the same.
+- **Re-evaluate on replay.** Set `reclassify_on_replay: true` on the replay request to re-run the auto-classification step against current polygons. Combine with `force_replay_across_major: true` if also crossing engine majors. Auto-promotion on a replay still emits `OPSEC_AUTO_CLASSIFIED`.
+- **Manual re-classification of a stored Run.** `PATCH /v1/runs/{id}` accepts a `sensitivity_class` field for upgrade only (over-classification). Downgrades require admin scope. The original class is preserved in the audit log.
+
+### E.7 Interaction with measurements
+
+`Measurement Set` carries a `sensitivity_class` field with the same enum. When a Run attaches a Measurement Set via `measurement_set_refs`, the Run's class is **the maximum** (most restrictive) of its declared class, the auto-promoted class, and every attached set's class. The PvO report block (§7.3) inherits the Run's class.
+
+### E.8 What this appendix is NOT
+
+- It is **not** a regulatory or legal compliance framework. It is operator policy enforced by software.
+- It is **not** an encryption story. Stored bytes are not encrypted differently per class; only response-shaping and ACLs are.
+- It is **not** automatic. Operators must configure `restricted_species_polygons`, `default_sensitivity_class`, and the `opsec_authorized` webhook allowlist for the controls in this appendix to do anything beyond honor the per-Run `sensitivity_class` field.
+- It is **not** a substitute for keeping sensitive AOIs out of analysts' hands altogether — a key with `opsec.read_restricted_species` sees full data. The minimum-privilege principle applies in the operator's key-issuance practice.
 
 ---
 
@@ -1292,6 +1455,9 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 
 ### v2 in-review patches (2026-04-25)
 
+- **§3.2 (entity count), §3.7 (new), §4.1 stage 2, Appendix D, §2.5** — added `regulatory_profile` as a 10th catalog entity. Carries per-jurisdiction band/EIRP/license-class rules; engine performs Stage 2 advisory checks and promotes to errors with `enforce_regulatory: true`. New error codes `REGULATORY_LIMIT_EXCEEDED`, `REGULATORY_BAND_UNCOVERED`; new warning codes `REGULATORY_LIMIT_ADVISORY`, `REGULATORY_BAND_UNCOVERED_ADVISORY`, `REGULATORY_LICENSE_NOTICE`. System ships an empty regulatory catalog by default (operator-curated; no government rules bundled).
+- **Appendix E (new), §3.1 (Run record — future amendment), Appendix D** — operational-sensitivity model: classification levels (`public`, `org_internal`, `location_redacted`, `restricted_species`), per-class redaction contract for artifacts and webhooks, auto-classification rule for restricted-species AOI intersection. New error code `OPSEC_CLASSIFICATION_REQUIRED`; new warning codes `OPSEC_AUTO_CLASSIFIED`, `OPSEC_REDACTION_APPLIED`.
+- **§8.2** — added retention timeline mermaid; rules unchanged.
 - **§1, §3.4** — vendor-specific narrative replaced with category-level framing; vendor entries (DJI Dock 2, D-RTK 3) demoted to seed-library examples built on the generic primitives. Added sensor seed examples (camera trap, fence sensor, gate sensor, wildlife collar) as Equipment Profiles; no new entity types introduced.
 - **§3.2 (Radio Profile)** — `link_type` opened from a closed enum to a string; only `generic` is core. Bundled plugins ship for `lora`, `lte`, `drone_c2`, `rtk`. See §4.6.
 - **§3.2 (Operating Volume)** — `Mission / Flight Envelope` renamed to `Operating Volume`; description generalized beyond drone use cases. `dock_site_ref` replaced with two optional fields `home_site_ref` (return-to-home / launch-recovery anchor) and `host_site_ref` (operational anchor for non-recovering deployments). API path `/v1/missions` → `/v1/operating-volumes`.

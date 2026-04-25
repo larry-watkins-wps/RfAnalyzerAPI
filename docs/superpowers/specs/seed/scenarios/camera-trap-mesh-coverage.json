@@ -1,0 +1,67 @@
+{
+  "id": "camera-trap-mesh-coverage",
+  "title": "Camera-trap mesh coverage from a single ranger camp tower (LoRa + LTE-CatM1 + VHF backup)",
+  "summary": "A ranger camp hosts a multi-link tower carrying three concurrent radios: a LoRa 868 gateway for the primary camera-trap mesh, an LTE Cat-M1 modem for higher-bandwidth devices that can reach a cell tower nearby, and a 150 MHz VHF antenna for backup wildlife-collar reception. Op C runs the propagation pipeline once per radio and produces a per-link breakdown plus a combined site score weighted by the operator's priorities. The scenario shows how heterogeneous links share one site without the request having to know how each link's plugin computes its outputs.",
+  "operation": "multi_link",
+  "demonstrates": [
+    "Op C (§4.0) multi-link",
+    "rx_templates with one entry per distinct link_type",
+    "lora + lte + vhf_telemetry plugins co-resident (§4.6)",
+    "combined_site_score (§6.5)"
+  ],
+  "tags": ["multi-link", "ranger-camp", "lora", "lte", "vhf"],
+  "sites": [
+    {
+      "name": "ranger-camp-letaba-tower",
+      "lat": -23.852,
+      "lon": 31.578,
+      "default_equipment_refs": [
+        { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" },
+        { "ref": "lte-cpe-outdoor",            "owner": "shared" },
+        { "ref": "vhf-yagi-handheld-3el",      "owner": "shared" }
+      ],
+      "notes": "30 m self-support, mains+solar, on the existing supply road."
+    }
+  ],
+  "request": {
+    "operation": "multi_link",
+    "tx_site": { "ref": "ranger-camp-letaba-tower" },
+    "rx_templates": [
+      { "link_type": "lora",          "equipment": { "ref": "camera-trap-lora-rx",       "owner": "shared" } },
+      { "link_type": "lte",           "equipment": { "ref": "camera-trap-lte-catm1-rx",  "owner": "shared" } },
+      { "link_type": "vhf_telemetry", "equipment": { "ref": "wildlife-collar-vhf-large", "owner": "shared" } }
+    ],
+    "aoi": {
+      "name": "letaba-camp-coverage-2026q2",
+      "bbox": { "south": -23.95, "west": 31.49, "north": -23.76, "east": 31.66 }
+    },
+    "resolution_m": 50,
+    "combined_site_score": {
+      "weights_per_link_type": { "lora": 2.0, "lte": 1.0, "vhf_telemetry": 1.5 }
+    },
+    "outputs": [
+      "link_budget",
+      "geotiff",
+      "stats",
+      "lora_best_sf",
+      "lte_rsrp",
+      "vhf_detection_probability",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "signal_strength_default",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T1_TERRAIN",
+    "errors_must_not_occur": ["OP_C_RX_TEMPLATE_MISSING", "RX_TX_FREQ_MISMATCH"],
+    "artifact_keys_present": [
+      "link_budget.lora", "link_budget.lte", "link_budget.vhf_telemetry",
+      "geotiff.lora", "geotiff.lte", "geotiff.vhf_telemetry",
+      "stats.lora", "stats.lte", "stats.vhf_telemetry", "stats.combined",
+      "lora_best_sf", "lte_rsrp", "vhf_detection_probability"
+    ],
+    "combined_site_score_present": true
+  },
+  "notes": "Each Tx is paired with the rx_template whose link_type matches its radio's link_type. Because the tower's `default_equipment_refs[]` already lists the three radios, the request omits `tx_equipment_refs` and lets the engine resolve them from the Site. The `combined_site_score` weights the LoRa link highest because the camera-trap mesh is the gating tier of the deployment; LTE is a convenience path; VHF is backup. Combined output uses `weakest_link` as the gating factor by default."
+}

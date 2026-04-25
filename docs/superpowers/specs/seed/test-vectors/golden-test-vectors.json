@@ -1,0 +1,259 @@
+{
+  "format_version": "1.0",
+  "comment": "Golden numerical test vectors for the RfAnalyzer engine. Each vector is self-contained and verifiable from documented formulas (see README.md). Implementations should pass every vector within the per-vector tolerance.",
+  "spec_baseline": "2026-04-25-rf-site-planning-api-design.md",
+
+  "vectors": [
+    {
+      "id": "fspl-1km-868mhz",
+      "category": "free_space",
+      "spec_refs": ["§4.1 stage 8", "§4.3 (Friis)"],
+      "description": "Free-space loss at 1 km, 868 MHz. Friis baseline.",
+      "inputs": { "distance_km": 1.0, "freq_mhz": 868.0 },
+      "expected": { "free_space_loss_db": 91.226 },
+      "tolerance": { "abs_db": 0.05 },
+      "notes": "32.45 + 20·log10(1) + 20·log10(868)."
+    },
+    {
+      "id": "fspl-10km-868mhz",
+      "category": "free_space",
+      "spec_refs": ["§4.1 stage 8"],
+      "description": "Free-space loss at 10 km, 868 MHz. Distance scaling check.",
+      "inputs": { "distance_km": 10.0, "freq_mhz": 868.0 },
+      "expected": { "free_space_loss_db": 111.226 },
+      "tolerance": { "abs_db": 0.05 },
+      "notes": "+20 dB per decade of distance."
+    },
+    {
+      "id": "fspl-1km-2400mhz",
+      "category": "free_space",
+      "spec_refs": ["§4.1 stage 8"],
+      "description": "Free-space loss at 1 km, 2.4 GHz. Frequency scaling check vs the 868 MHz baseline.",
+      "inputs": { "distance_km": 1.0, "freq_mhz": 2400.0 },
+      "expected": { "free_space_loss_db": 100.046 },
+      "tolerance": { "abs_db": 0.05 },
+      "notes": "32.45 + 0 + 20·log10(2400) ≈ 100.046."
+    },
+    {
+      "id": "fspl-5km-2400mhz",
+      "category": "free_space",
+      "spec_refs": ["§4.1 stage 8"],
+      "description": "Free-space loss at 5 km, 2.4 GHz. Combined distance + frequency scaling.",
+      "inputs": { "distance_km": 5.0, "freq_mhz": 2400.0 },
+      "expected": { "free_space_loss_db": 114.025 },
+      "tolerance": { "abs_db": 0.05 },
+      "notes": "32.45 + 13.979 + 67.604 = 114.034 — the 0.05 dB tolerance accommodates implementations that compute log10 with double-precision rounding."
+    },
+    {
+      "id": "fspl-1km-150mhz",
+      "category": "free_space",
+      "spec_refs": ["§4.1 stage 8"],
+      "description": "Free-space loss at 1 km, 150 MHz (VHF telemetry baseline).",
+      "inputs": { "distance_km": 1.0, "freq_mhz": 150.0 },
+      "expected": { "free_space_loss_db": 75.972 },
+      "tolerance": { "abs_db": 0.05 },
+      "notes": "32.45 + 0 + 20·log10(150)."
+    },
+
+    {
+      "id": "polarization-vv-aligned",
+      "category": "polarization",
+      "spec_refs": ["§4.5 Step 1 table"],
+      "description": "V-V polarization, no mismatch.",
+      "inputs": { "tx_pol": "V", "rx_pol": "V", "depolarization_d": 0.0 },
+      "expected": {
+        "base_mismatch_db": 0.0,
+        "depolarization_d_used": 0.0,
+        "effective_mismatch_db": 0.0
+      },
+      "tolerance": { "abs_db": 0.0 }
+    },
+    {
+      "id": "polarization-vh-no-clutter",
+      "category": "polarization",
+      "spec_refs": ["§4.5"],
+      "description": "V-H polarization, no clutter (d=0). Full 20 dB cross-pol.",
+      "inputs": { "tx_pol": "V", "rx_pol": "H", "depolarization_d": 0.0 },
+      "expected": {
+        "base_mismatch_db": 20.0,
+        "depolarization_d_used": 0.0,
+        "effective_mismatch_db": 20.0
+      },
+      "tolerance": { "abs_db": 0.0 },
+      "notes": "max(3, 20 × (1 − 0)) = 20."
+    },
+    {
+      "id": "polarization-vh-mid-clutter",
+      "category": "polarization",
+      "spec_refs": ["§4.5"],
+      "description": "V-H polarization with d=0.5 (moderate canopy depolarization). 10 dB effective mismatch.",
+      "inputs": { "tx_pol": "V", "rx_pol": "H", "depolarization_d": 0.5 },
+      "expected": {
+        "base_mismatch_db": 20.0,
+        "depolarization_d_used": 0.5,
+        "effective_mismatch_db": 10.0
+      },
+      "tolerance": { "abs_db": 0.0 },
+      "notes": "max(3, 20 × (1 − 0.5)) = max(3, 10) = 10."
+    },
+    {
+      "id": "polarization-vh-heavy-clutter-floor",
+      "category": "polarization",
+      "spec_refs": ["§4.5 (3 dB floor)"],
+      "description": "V-H polarization with d=0.95 (very heavy depolarization). The 3 dB floor binds.",
+      "inputs": { "tx_pol": "V", "rx_pol": "H", "depolarization_d": 0.95 },
+      "expected": {
+        "base_mismatch_db": 20.0,
+        "depolarization_d_used": 0.95,
+        "effective_mismatch_db": 3.0
+      },
+      "tolerance": { "abs_db": 0.0 },
+      "notes": "max(3, 20 × 0.05) = max(3, 1) = 3 — floor binds."
+    },
+    {
+      "id": "polarization-v-rhcp-floor-exempt",
+      "category": "polarization",
+      "spec_refs": ["§4.5 (≤3 dB exemption)"],
+      "description": "V to RHCP base mismatch is 3 dB; the ≤3 dB floor exemption keeps it at 3 regardless of d.",
+      "inputs": { "tx_pol": "V", "rx_pol": "RHCP", "depolarization_d": 0.7 },
+      "expected": {
+        "base_mismatch_db": 3.0,
+        "depolarization_d_used": 0.7,
+        "effective_mismatch_db": 3.0
+      },
+      "tolerance": { "abs_db": 0.0 },
+      "notes": "Because base ≤ 3, no attenuation is applied — effective stays at base."
+    },
+
+    {
+      "id": "cable-loss-curve-868",
+      "category": "cable_loss",
+      "spec_refs": ["§3.2 Equipment Profile cable_loss_curve"],
+      "description": "Piecewise-linear cable-loss interpolation at 868 MHz between two declared knots.",
+      "inputs": {
+        "cable_loss_curve": [
+          { "freq_mhz": 800.0, "loss_db": 1.5 },
+          { "freq_mhz": 900.0, "loss_db": 2.0 }
+        ],
+        "evaluate_at_freq_mhz": 868.0
+      },
+      "expected": { "cable_loss_db": 1.84 },
+      "tolerance": { "abs_db": 0.005 },
+      "notes": "1.5 + (868−800)/(900−800) × (2.0 − 1.5) = 1.5 + 0.34 = 1.84."
+    },
+    {
+      "id": "cable-loss-curve-extrapolation-clamp",
+      "category": "cable_loss",
+      "spec_refs": ["§3.2 Equipment Profile cable_loss_curve"],
+      "description": "Frequency above the curve's domain — engine clamps to the nearest knot and emits a warning.",
+      "inputs": {
+        "cable_loss_curve": [
+          { "freq_mhz": 800.0, "loss_db": 1.5 },
+          { "freq_mhz": 900.0, "loss_db": 2.0 }
+        ],
+        "evaluate_at_freq_mhz": 950.0
+      },
+      "expected": {
+        "cable_loss_db": 2.0,
+        "warning_code_expected": "RESOLUTION_EXCEEDS_DATA"
+      },
+      "tolerance": { "abs_db": 0.0 },
+      "notes": "Out-of-domain extrapolation is documented as warn+clamp; this vector pins the behavior."
+    },
+
+    {
+      "id": "freq-authority-pass-narrow-offset",
+      "category": "frequency_authority",
+      "spec_refs": ["§4.0 Frequency authority"],
+      "description": "Tx 868.1, Rx 868.2, Tx bandwidth 125 kHz. Offset 0.1 MHz < threshold 0.1875 MHz → PASS.",
+      "inputs": {
+        "tx_freq_mhz": 868.1,
+        "tx_bandwidth_khz": 125.0,
+        "rx_freq_mhz": 868.2
+      },
+      "expected": {
+        "threshold_mhz": 0.1875,
+        "delta_mhz": 0.1,
+        "validation_result": "PASS"
+      },
+      "tolerance": { "abs_mhz": 0.0001 }
+    },
+    {
+      "id": "freq-authority-fail-wide-offset",
+      "category": "frequency_authority",
+      "spec_refs": ["§4.0 Frequency authority", "Appendix D RX_TX_FREQ_MISMATCH"],
+      "description": "Tx 868.1, Rx 868.5, Tx bandwidth 125 kHz. Offset 0.4 MHz > threshold 0.1875 MHz → REJECT.",
+      "inputs": {
+        "tx_freq_mhz": 868.1,
+        "tx_bandwidth_khz": 125.0,
+        "rx_freq_mhz": 868.5
+      },
+      "expected": {
+        "threshold_mhz": 0.1875,
+        "delta_mhz": 0.4,
+        "validation_result": "REJECT",
+        "error_code": "RX_TX_FREQ_MISMATCH"
+      },
+      "tolerance": { "abs_mhz": 0.0001 }
+    },
+
+    {
+      "id": "full-link-budget-1km-868mhz-vv-no-clutter",
+      "category": "full_link_budget",
+      "spec_refs": ["§4.1 stage 9"],
+      "description": "Composite link budget over 1 km of free-space path, 868 MHz, V-V pol, no clutter, no fading. Verifies that the engine's stage-9 aggregation matches the documented formula.",
+      "inputs": {
+        "distance_km": 1.0,
+        "freq_mhz": 868.0,
+        "tx_power_dbm": 14.0,
+        "tx_antenna_gain_dbi": 6.0,
+        "tx_cable_loss_db": 1.0,
+        "tx_pol": "V",
+        "path_loss_db": 91.226,
+        "clutter_loss_db": 0.0,
+        "rx_antenna_gain_dbi": 2.0,
+        "rx_feeder_loss_db": 0.0,
+        "rx_pol": "V",
+        "rx_sensitivity_dbm": -123.0,
+        "depolarization_d": 0.0
+      },
+      "expected": {
+        "polarization_mismatch_db": 0.0,
+        "received_power_dbm": -70.226,
+        "fade_margin_db": 52.774,
+        "link_result": "PASS"
+      },
+      "tolerance": { "abs_db": 0.1 },
+      "notes": "14 + 6 − 1 − 91.226 − 0 − 0 + 2 − 0 = −70.226 dBm. Margin = −70.226 − (−123) = 52.774."
+    },
+    {
+      "id": "full-link-budget-1km-868mhz-vh-mid-clutter",
+      "category": "full_link_budget",
+      "spec_refs": ["§4.1 stage 9", "§4.5"],
+      "description": "Same geometry as `full-link-budget-1km-868mhz-vv-no-clutter` but with V-H polarization and d=0.5. Demonstrates polarization mismatch's contribution to fade margin reduction.",
+      "inputs": {
+        "distance_km": 1.0,
+        "freq_mhz": 868.0,
+        "tx_power_dbm": 14.0,
+        "tx_antenna_gain_dbi": 6.0,
+        "tx_cable_loss_db": 1.0,
+        "tx_pol": "V",
+        "path_loss_db": 91.226,
+        "clutter_loss_db": 0.0,
+        "rx_antenna_gain_dbi": 2.0,
+        "rx_feeder_loss_db": 0.0,
+        "rx_pol": "H",
+        "rx_sensitivity_dbm": -123.0,
+        "depolarization_d": 0.5
+      },
+      "expected": {
+        "polarization_mismatch_db": 10.0,
+        "received_power_dbm": -80.226,
+        "fade_margin_db": 42.774,
+        "link_result": "PASS"
+      },
+      "tolerance": { "abs_db": 0.1 },
+      "notes": "Compared with the V-V vector: 10 dB less margin from cross-pol with mid-clutter depolarization."
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "id": "rhino-vhf-collar-tracking",
+  "title": "Rhino VHF collar tracking from a handheld Yagi",
+  "summary": "Compute a detection-probability and bearing-quality heatmap for a single VHF wildlife collar transmitting from a candidate location inside a protected reserve, as observed by a ranger walking the patrol AOI with a 3-element Yagi tuned to 150 MHz. The result tells field rangers where in the AOI they can reliably hear the collar and where the bearing read will be usable for direction-finding triangulation. The scenario is `restricted_species` because both the collar frequency and its location are sensitive — the collared individual is anti-poaching protected.",
+  "operation": "area",
+  "demonstrates": [
+    "Op B (§4.0)",
+    "vhf_telemetry link-type plugin (§4.6)",
+    "vhf_detection_probability + vhf_bearing_quality artifacts (§6.2)",
+    "Appendix E restricted_species class with auto-classification"
+  ],
+  "tags": ["wildlife", "anti-poaching", "vhf", "rhino"],
+  "sites": [
+    {
+      "name": "collar-rhino-individual-mfolozi-001",
+      "lat": -28.401,
+      "lon": 31.927,
+      "ground_elevation_override_m": 195,
+      "notes": "Approximate; replace with collar-reported coordinates at runtime."
+    }
+  ],
+  "request": {
+    "operation": "area",
+    "tx_site":      { "ref": "collar-rhino-individual-mfolozi-001", "owner": "self" },
+    "tx_equipment": { "ref": "wildlife-collar-vhf-large",            "owner": "shared" },
+    "rx_template":  { "ref": "vhf-yagi-handheld-3el",                "owner": "shared" },
+    "rx_altitude_override_m_agl": 1.5,
+    "aoi": {
+      "name": "mfolozi-patrol-2026q2",
+      "bbox": { "south": -28.45, "west": 31.88, "north": -28.36, "east": 31.97 }
+    },
+    "resolution_m": 50,
+    "outputs": [
+      "vhf_detection_probability",
+      "vhf_bearing_quality",
+      "vhf_range_envelope",
+      "geotiff",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "signal_strength_default",
+    "min_fidelity_tier": "T2_TERRAIN_PLUS_CLUTTER",
+    "sensitivity_class": "restricted_species",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "warnings_likely": ["OPSEC_AUTO_CLASSIFIED"],
+    "warnings_possible_at_t3": [],
+    "warnings_possible_at_t2": [],
+    "errors_must_not_occur": ["LINK_TYPE_NOT_REGISTERED", "ANTENNA_OUT_OF_BAND"],
+    "models_used_likely": ["ITU-R P.1812", "ITM"],
+    "artifact_keys_present": [
+      "vhf_detection_probability",
+      "vhf_bearing_quality",
+      "vhf_range_envelope",
+      "geotiff",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "stats_ranges": {
+      "fraction_pixels_above_sensitivity_min": 0.05,
+      "fraction_pixels_above_sensitivity_max": 0.85,
+      "median_received_power_dbm_range": [-130, -90]
+    }
+  },
+  "notes": "Auto-classification fires because the AOI bbox is configured as a `restricted_species` polygon in this deployment's policy. With `require_explicit_classification_in_polygon: false` (default), the explicit `sensitivity_class` declaration also matches, so OPSEC_AUTO_CLASSIFIED is informational. The 3-element Yagi's directional pattern interacts with `vhf_bearing_quality` — the engine uses receiver SNR plus active clutter classes along the path to grade DF feasibility."
+}

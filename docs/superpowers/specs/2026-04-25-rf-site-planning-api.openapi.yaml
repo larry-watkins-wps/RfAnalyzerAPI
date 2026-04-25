@@ -194,6 +194,28 @@ paths:
     patch:  { tags: [catalog], operationId: updateOperatingVolume, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } }, responses: { '200': { description: Updated. } } }
     delete: { tags: [catalog], operationId: deleteOperatingVolume, responses: { '204': { description: Soft-deleted. } } }
 
+  # ── Regulatory Profiles ──────────────────────────────────────────────
+  /regulatory-profiles:
+    get:
+      tags: [catalog]
+      operationId: listRegulatoryProfiles
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
+      responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfRegulatoryProfiles' } } } } }
+    post:
+      tags: [catalog]
+      operationId: createRegulatoryProfile
+      description: |
+        Per-jurisdiction band/EIRP/license-class rules (spec §3.7).
+        Operator-curated; the system ships no bundled regulatory profiles.
+        Advisory only — does not constitute licensing advice.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RegulatoryProfile' } } } }
+      responses: { '201': { description: Created. } }
+  /regulatory-profiles/{id}:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    get:    { tags: [catalog], operationId: getRegulatoryProfile,    responses: { '200': { description: RegulatoryProfile., content: { application/json: { schema: { $ref: '#/components/schemas/RegulatoryProfile' } } } } } }
+    patch:  { tags: [catalog], operationId: updateRegulatoryProfile, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RegulatoryProfile' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteRegulatoryProfile, responses: { '204': { description: Soft-deleted. } } }
+
   # ── Comparisons ──────────────────────────────────────────────────────
   /comparisons:
     get:
@@ -248,7 +270,7 @@ paths:
       operationId: appendMeasurements
       description: Chunked append for ongoing telemetry. Creates a new Measurement Set version (light copy-on-write); point-level dedup by (lat, lon, alt_m_agl, freq_mhz, timestamp).
       parameters:
-        - in: header, name: Idempotency-Key, required: true, schema: { type: string }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
@@ -375,7 +397,7 @@ paths:
     post:
       tags: [runs]
       operationId: replayRun
-      description: Resubmits the original run against the engine major recorded on it. Cross-major requires `force_replay_across_major: true`.
+      description: 'Resubmits the original run against the engine major recorded on it. Cross-major requires `force_replay_across_major: true`.'
       requestBody:
         content:
           application/json:
@@ -466,7 +488,7 @@ paths:
                 required: [artifact, cached_until]
                 properties:
                   artifact:    { $ref: '#/components/schemas/ArtifactRef' }
-                  cached_until:{ type: string, format: date-time }
+                  cached_until: { type: string, format: date-time }
   /runs/{id}/artifacts/voxel/slice:
     parameters:
       - { $ref: '#/components/parameters/EntityId' }
@@ -563,7 +585,7 @@ components:
     FilterShare:   { in: query,  name: share,            schema: { type: string, enum: [private, shared, all], default: all } }
     EntityId:      { in: path,   name: id,    required: true, schema: { type: string } }
     ArtifactKey:   { in: path,   name: key,   required: true, schema: { type: string } }
-    IdempotencyKey:{ in: header, name: Idempotency-Key,  schema: { type: string } }
+    IdempotencyKey: { in: header, name: Idempotency-Key,  schema: { type: string } }
 
   responses:
     Unauthorized:
@@ -621,6 +643,9 @@ components:
             - BYO_LAYER_VALIDATION_FAILED
             - VOXEL_NOT_AVAILABLE
             - REPLAY_ACROSS_ENGINE_MAJOR
+            - REGULATORY_LIMIT_EXCEEDED
+            - REGULATORY_BAND_UNCOVERED
+            - OPSEC_CLASSIFICATION_REQUIRED
         warnings:
           type: array
           items:
@@ -637,6 +662,11 @@ components:
                   - DSM_GAP
                   - FETCHED_LAYER_PARTIAL
                   - RESOLUTION_EXCEEDS_DATA
+                  - REGULATORY_LIMIT_ADVISORY
+                  - REGULATORY_BAND_UNCOVERED_ADVISORY
+                  - REGULATORY_LICENSE_NOTICE
+                  - OPSEC_AUTO_CLASSIFIED
+                  - OPSEC_REDACTION_APPLIED
               detail: { type: string }
 
     Page:
@@ -909,6 +939,7 @@ components:
         share:   { type: string, enum: [private, shared], default: private }
         version: { type: integer, readOnly: true }
         ordered: { type: boolean, default: false }
+        sensitivity_class: { $ref: '#/components/schemas/SensitivityClass' }
         site_ref: { $ref: '#/components/schemas/Reference' }
         aoi_ref:  { $ref: '#/components/schemas/Reference' }
         device_ref: { $ref: '#/components/schemas/Reference' }
@@ -949,16 +980,64 @@ components:
         decided_at: { type: string, format: date-time }
         tags: { type: array, items: { type: string } }
 
+    LicenseClass:
+      type: string
+      enum: [license_exempt, license_required, permit_required, prohibited]
+      description: |
+        License class for the band, per regulator. `license_exempt` is the only
+        class for which `enforce_regulatory: true` will not raise a notice;
+        all others raise `REGULATORY_LICENSE_NOTICE` regardless of
+        `enforce_regulatory`. (spec §3.7)
+
+    RegulatoryBand:
+      type: object
+      required: [min_mhz, max_mhz, max_eirp_dbm, license_class]
+      properties:
+        name:               { type: string, description: 'Display label, e.g., "VHF wildlife telemetry"' }
+        min_mhz:            { type: number, exclusiveMinimum: 0 }
+        max_mhz:            { type: number, exclusiveMinimum: 0 }
+        link_type_hint:     { $ref: '#/components/schemas/LinkType', description: 'Informational; not used for matching.' }
+        max_eirp_dbm:       { type: number }
+        duty_cycle_pct_max: { type: number, minimum: 0, maximum: 100 }
+        bandwidth_khz_max:  { type: number, exclusiveMinimum: 0 }
+        license_class:      { $ref: '#/components/schemas/LicenseClass' }
+        notes:              { type: string }
+
+    RegulatoryProfile:
+      type: object
+      description: |
+        Per-jurisdiction band/EIRP/license-class rules (spec §3.7).
+        Operator-curated. Advisory only — does not constitute licensing advice.
+      required: [name, country_code, regulator, bands]
+      properties:
+        id:           { type: string, readOnly: true }
+        name:         { type: string }
+        share:        { type: string, enum: [private, shared], default: private }
+        version:      { type: integer, readOnly: true }
+        country_code: { type: string, pattern: '^[A-Z]{2}$', description: 'ISO-3166-1 alpha-2 country code, e.g., ZA, BW, NA, KE, TZ.' }
+        regulator:    { type: string, description: 'Display name of the regulator, e.g., ICASA, BOCRA, CRAN, CA, TCRA.' }
+        bands:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/RegulatoryBand' }
+        effective_date:        { type: string, format: date }
+        superseded_at:         { type: string, format: date }
+        regulator_url:         { type: string, format: uri }
+        reference_doc_asset_ref: { $ref: '#/components/schemas/AssetId' }
+        notes: { type: string }
+        tags:  { type: array, items: { type: string } }
+
     # Page wrappers
-    PageOfSites:             { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Site' } } } }] }
-    PageOfAntennas:          { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Antenna' } } } }] }
-    PageOfRadioProfiles:     { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/RadioProfile' } } } }] }
-    PageOfEquipmentProfiles: { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/EquipmentProfile' } } } }] }
-    PageOfAOIPacks:          { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/AOIPack' } } } }] }
-    PageOfClutterTables:     { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ClutterTable' } } } }] }
-    PageOfOperatingVolumes:  { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OperatingVolume' } } } }] }
-    PageOfMeasurementSets:   { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/MeasurementSet' } } } }] }
-    PageOfComparisons:       { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Comparison' } } } }] }
+    PageOfSites:               { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Site' } } } }] }
+    PageOfAntennas:            { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Antenna' } } } }] }
+    PageOfRadioProfiles:       { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/RadioProfile' } } } }] }
+    PageOfEquipmentProfiles:   { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/EquipmentProfile' } } } }] }
+    PageOfAOIPacks:            { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/AOIPack' } } } }] }
+    PageOfClutterTables:       { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ClutterTable' } } } }] }
+    PageOfOperatingVolumes:    { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OperatingVolume' } } } }] }
+    PageOfMeasurementSets:     { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/MeasurementSet' } } } }] }
+    PageOfComparisons:         { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Comparison' } } } }] }
+    PageOfRegulatoryProfiles:  { allOf: [{ $ref: '#/components/schemas/Page' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/RegulatoryProfile' } } } }] }
 
     # ── Assets ────────────────────────────────────────────────────────
     AssetInitiateRequest:
@@ -1082,6 +1161,8 @@ components:
         comparison_id:        { type: [string, "null"] }
         replay_of_run_id:     { type: [string, "null"] }
         replay_engine_major_drift: { type: [string, "null"], description: "e.g., '1->2'" }
+        sensitivity_class:    { $ref: '#/components/schemas/SensitivityClass' }
+        regulatory_profile_ref_resolved: { type: [string, "null"], description: 'Convenience pointer into inputs_resolved if a regulatory profile was supplied; null otherwise.' }
 
     RunAccepted:
       type: object
@@ -1219,6 +1300,21 @@ components:
         - { $ref: '#/components/schemas/Reference' }
         - { $ref: '#/components/schemas/OperatingVolume' }
 
+    RegulatoryOrInline:
+      oneOf:
+        - { $ref: '#/components/schemas/Reference' }
+        - { $ref: '#/components/schemas/RegulatoryProfile' }
+
+    SensitivityClass:
+      type: string
+      enum: [public, org_internal, location_redacted, restricted_species]
+      description: |
+        Operational sensitivity classification for the Run and its artifacts
+        (Appendix E). Defaults to the deployment's configured default
+        (typically `org_internal`). May be auto-promoted at submission time
+        when the resolved geometry intersects a configured restricted-species
+        polygon (`OPSEC_AUTO_CLASSIFIED` warning).
+
     AnalysisCommon:
       type: object
       properties:
@@ -1228,7 +1324,7 @@ components:
         fading_model:        { $ref: '#/components/schemas/FadingModel' }
         fading_params:       { type: object }
         min_fidelity_tier:   { $ref: '#/components/schemas/FidelityTier' }
-        min_fidelity_coverage:{ $ref: '#/components/schemas/MinFidelityCoverage' }
+        min_fidelity_coverage: { $ref: '#/components/schemas/MinFidelityCoverage' }
         color_map:           { $ref: '#/components/schemas/ColorMap' }
         contour_levels_db:   { type: array, items: { type: number } }
         output_crs:          { type: string }
@@ -1238,6 +1334,9 @@ components:
         dedupe:              { type: boolean, default: false }
         webhook_url:         { type: string, format: uri }
         point_query_locations: { type: array, items: { $ref: '#/components/schemas/LatLonAlt' } }
+        regulatory_profile_ref: { $ref: '#/components/schemas/RegulatoryOrInline' }
+        enforce_regulatory:    { type: boolean, default: false, description: 'When true, regulatory band/EIRP violations promote from warnings to errors. License notices remain advisory either way (spec §3.7).' }
+        sensitivity_class:     { $ref: '#/components/schemas/SensitivityClass' }
 
     TxSiteEntry:
       type: object

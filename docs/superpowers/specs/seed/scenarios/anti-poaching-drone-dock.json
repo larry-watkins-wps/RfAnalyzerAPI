@@ -1,0 +1,74 @@
+{
+  "id": "anti-poaching-drone-dock",
+  "title": "Anti-poaching drone-dock placement: 2.4 GHz C2 voxel coverage at patrol altitudes",
+  "summary": "Two candidate dock sites are being evaluated for an autonomous drone deployed against rhino-poaching incursions. The drone's mission envelope is 60 to 150 m AGL across a 12 km × 8 km patrol AOI. Op E computes a 3D voxel of received power at the drone's antenna, derives a pass/fail surface against C2 sensitivity, and emits the maximum-range envelope per altitude. The scenario is `restricted_species` because both dock locations and patrol routes are operationally sensitive.",
+  "operation": "voxel",
+  "demonstrates": [
+    "Op E (§4.0) volumetric coverage",
+    "Operating Volume entity (§3.2) with home_site_ref",
+    "drone_c2 link-type plugin (§4.6, §6.2)",
+    "Appendix E restricted_species class with auto-classification",
+    "voxel slicing (§6.6) — implied for downstream consumers"
+  ],
+  "tags": ["drone", "anti-poaching", "c2", "voxel", "restricted-species"],
+  "sites": [
+    { "name": "dock-candidate-north-ridge",  "lat": -23.510, "lon": 31.290, "ground_elevation_override_m": 462, "notes": "Existing communications hut footprint." },
+    { "name": "dock-candidate-east-spur",    "lat": -23.495, "lon": 31.348, "ground_elevation_override_m": 388, "notes": "Greenfield; access road needed." }
+  ],
+  "request": {
+    "operation": "voxel",
+    "tx_sites": [
+      { "site": { "ref": "dock-candidate-north-ridge" }, "equipment": { "ref": "drone-dock-c2-2_4ghz", "owner": "shared" } },
+      { "site": { "ref": "dock-candidate-east-spur"   }, "equipment": { "ref": "drone-dock-c2-2_4ghz", "owner": "shared" } }
+    ],
+    "rx_template": { "ref": "drone-c2-2_4ghz", "owner": "shared" },
+    "operating_volume": {
+      "name": "patrol-envelope-2026q2",
+      "polygon": {
+        "type": "Polygon",
+        "coordinates": [[
+          [31.25, -23.55],
+          [31.39, -23.55],
+          [31.39, -23.45],
+          [31.25, -23.45],
+          [31.25, -23.55]
+        ]]
+      },
+      "altitude_min_m_agl": 60,
+      "altitude_max_m_agl": 150,
+      "altitude_step_m": 10,
+      "home_site_ref": { "ref": "dock-candidate-north-ridge" }
+    },
+    "resolution_m": 50,
+    "outputs": [
+      "voxel",
+      "geotiff_stack",
+      "c2_pass_fail",
+      "c2_range_envelope",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "pass_fail",
+    "voxel_lossless": false,
+    "min_fidelity_tier": "T2_TERRAIN_PLUS_CLUTTER",
+    "sensitivity_class": "restricted_species",
+    "mode": "async"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "mode_executed": "async",
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "warnings_likely": ["OPSEC_AUTO_CLASSIFIED"],
+    "errors_must_not_occur": ["FIDELITY_FLOOR_NOT_MET", "RX_TX_FREQ_MISMATCH"],
+    "models_used_likely": ["ITU-R P.528", "ITU-R P.1812"],
+    "artifact_keys_present": [
+      "voxel",
+      "geotiff_stack",
+      "c2_pass_fail",
+      "c2_range_envelope",
+      "stats",
+      "fidelity_tier_raster"
+    ]
+  },
+  "notes": "P.528 (air-to-ground) is preferred for this scenario by the auto-select strategy (§4.4) because the operation is Op E with link_type drone_c2; P.1812 also fits. `voxel_lossless: false` keeps the default 0.5 dB quantization (§6.1, voxel row). Slice queries against the resulting voxel can extract per-altitude geotiffs for review without re-running the pipeline. With `home_site_ref` set, the engine flags voxels where the return-to-home leg would not close as a separate margin; this is informational, not a separate output key."
+}

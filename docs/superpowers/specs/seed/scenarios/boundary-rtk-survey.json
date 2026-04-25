@@ -1,0 +1,49 @@
+{
+  "id": "boundary-rtk-survey",
+  "title": "RTK link from a survey base station to a fence-corner rover",
+  "summary": "Will the 2.4 GHz RTK correction link from a base station at the ranger workshop close at the southwest fence corner 3.6 km away, given mopane woodland between them? The result drives whether the corner can be surveyed with single-base RTK or needs an NTRIP service. Output is the standard Op A point-to-point bundle: link budget, terrain path profile, and a rendered cross-section diagram.",
+  "operation": "p2p",
+  "demonstrates": [
+    "Op A (§4.0) point-to-point",
+    "rtk link-type plugin (§4.6, §6.2)",
+    "rendered_cross_section derivative (§6.1)"
+  ],
+  "tags": ["rtk", "survey", "p2p", "boundary"],
+  "sites": [
+    { "name": "rtk-base-workshop",     "lat": -22.118, "lon": 30.480, "notes": "Ranger workshop roof; 6 m AGL." },
+    { "name": "rtk-rover-sw-corner",   "lat": -22.149, "lon": 30.452, "notes": "Fence corner; 1.8 m surveyor's pole." }
+  ],
+  "request": {
+    "operation": "p2p",
+    "tx_site":      { "ref": "rtk-base-workshop" },
+    "tx_equipment": { "ref": "rtk-base-2_4ghz",   "owner": "shared" },
+    "rx_site":      { "ref": "rtk-rover-sw-corner" },
+    "rx_equipment": { "ref": "rtk-2_4ghz-base",   "owner": "shared" },
+    "outputs": [
+      "link_budget",
+      "path_profile",
+      "rendered_cross_section",
+      "rtk_pass_fail"
+    ],
+    "color_map": "signal_strength_default",
+    "min_fidelity_tier": "T3_SURFACE",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "errors_must_not_occur": ["RX_TX_FREQ_MISMATCH", "ANTENNA_OUT_OF_BAND"],
+    "models_used_likely": ["ITU-R P.1812", "ITM"],
+    "artifact_keys_present": [
+      "link_budget",
+      "path_profile",
+      "rendered_cross_section",
+      "rtk_pass_fail"
+    ],
+    "link_budget_ranges": {
+      "free_space_loss_db_range": [-115, -105],
+      "fade_margin_db_range": [-20, 30]
+    }
+  },
+  "notes": "If the AOI Pack covering this geometry has DSM, fidelity reaches T3 and the canopy obstruction shows in the cross-section. Without DSM, the engine falls back to T2 (DTM + clutter); `min_fidelity_tier: T3_SURFACE` will then trigger `FIDELITY_FLOOR_NOT_MET` and FAIL — operators expecting woodland obstruction should provision DSM before requiring T3 here."
+}

@@ -1,0 +1,60 @@
+{
+  "id": "fence-line-lora-monitoring",
+  "title": "Best-server LoRa coverage for fence-line sensors across 4 candidate masts",
+  "summary": "A 60 km perimeter fence is instrumented with LoRa fence-cut sensors every ~500 m. The reserve has budget for one or two new mast sites in addition to its existing two; this scenario computes which combination of 4 candidate masts gives the best per-sensor coverage. Output is the canonical Op D best-server raster plus the `lora_best_sf` derivative — the field ops lead can see which fence segments fall back to SF12 (slow, robust) and which can run SF7 (fast, cheap on duty cycle).",
+  "operation": "multi_tx",
+  "demonstrates": [
+    "Op D (§4.0) best-server",
+    "best_server_raster artifact NoData + tiebreak (§6.1)",
+    "lora link-type plugin: lora_best_sf (§6.2)"
+  ],
+  "tags": ["lora", "fence-line", "perimeter", "iot"],
+  "sites": [
+    { "name": "mast-northgate-existing", "lat": -24.012, "lon": 31.520, "notes": "Existing 30 m mast." },
+    { "name": "mast-southridge-existing", "lat": -24.063, "lon": 31.578, "notes": "Existing 24 m mast." },
+    { "name": "mast-westwall-candidate-A", "lat": -24.034, "lon": 31.495, "notes": "Candidate; quote in for 25 m self-supporting." },
+    { "name": "mast-eastfence-candidate-B", "lat": -24.041, "lon": 31.612, "notes": "Candidate; piggyback on water-tower." }
+  ],
+  "request": {
+    "operation": "multi_tx",
+    "tx_sites": [
+      { "site": { "ref": "mast-northgate-existing"     }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } },
+      { "site": { "ref": "mast-southridge-existing"    }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } },
+      { "site": { "ref": "mast-westwall-candidate-A"   }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } },
+      { "site": { "ref": "mast-eastfence-candidate-B"  }, "equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" } }
+    ],
+    "rx_template": { "ref": "fence-sensor-lora-rx", "owner": "shared" },
+    "aoi": {
+      "name": "kruger-perimeter-2026q2",
+      "bbox": { "south": -24.085, "west": 31.475, "north": -23.995, "east": 31.640 }
+    },
+    "resolution_m": 30,
+    "outputs": [
+      "best_server_raster",
+      "geotiff",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "lora_sf",
+    "min_fidelity_coverage": { "tier": "T2_TERRAIN_PLUS_CLUTTER", "fraction": 0.95 },
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T2_TERRAIN_PLUS_CLUTTER",
+    "errors_must_not_occur": ["FIDELITY_FLOOR_NOT_MET", "OP_C_RX_TEMPLATE_MISSING"],
+    "models_used_likely": ["ITU-R P.1812"],
+    "artifact_keys_present": [
+      "best_server_raster",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster",
+      "geotiff.A", "geotiff.B", "geotiff.C", "geotiff.D"
+    ],
+    "stats_ranges": {
+      "fraction_pixels_with_a_winner_min": 0.85
+    }
+  },
+  "notes": "best_server_raster uses 1-indexed values; sidecar JSON maps 1→mast-northgate-existing, 2→mast-southridge-existing, 3→mast-westwall-candidate-A, 4→mast-eastfence-candidate-B. Fence segments at SF12 are the gating constraint — operators considering a 5th mast should focus on those segments. To run with regulatory enforcement for South Africa, attach `regulatory_profile_ref` per the multi-jurisdictional-iot scenario."
+}

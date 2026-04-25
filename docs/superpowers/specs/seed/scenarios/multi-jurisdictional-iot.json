@@ -1,0 +1,76 @@
+{
+  "id": "multi-jurisdictional-iot",
+  "title": "Transboundary LoRa coverage with regulatory enforcement on the Botswana side",
+  "summary": "A LoRa gateway proposed near Pandamatenga sits ~6 km from the Botswana / Zimbabwe border. The deployment AOI deliberately straddles both countries to study cross-border camera-trap coverage. This scenario attaches an inline `regulatory_profile` for Botswana and runs with `enforce_regulatory: true` so any band/EIRP overrun fails the run before computation. The gateway is configured at the regulator's 868 MHz EIRP cap; the inline profile demonstrates how operators encode the rules they care about without depending on a bundled regulatory catalog (the system ships none — see §3.7).",
+  "operation": "area",
+  "demonstrates": [
+    "Op B (§4.0)",
+    "regulatory_profile catalog entity (§3.7) with inline declaration",
+    "enforce_regulatory: true (§3.7)",
+    "REGULATORY_LICENSE_NOTICE warning (Appendix D)"
+  ],
+  "tags": ["lora", "regulatory", "transboundary", "kaza"],
+  "sites": [
+    {
+      "name": "lora-gateway-pandamatenga",
+      "lat": -18.523,
+      "lon": 25.642,
+      "notes": "20 m guyed mast, mains+solar."
+    }
+  ],
+  "request": {
+    "operation": "area",
+    "tx_site":      { "ref": "lora-gateway-pandamatenga" },
+    "tx_equipment": { "ref": "lora-gateway-868-omni-6dbi", "owner": "shared" },
+    "rx_template":  { "ref": "camera-trap-lora-rx",        "owner": "shared" },
+    "rx_altitude_override_m_agl": 1.0,
+    "aoi": {
+      "name": "kaza-transboundary-2026q2",
+      "bbox": { "south": -18.62, "west": 25.55, "north": -18.43, "east": 25.74 }
+    },
+    "resolution_m": 50,
+    "regulatory_profile_ref": {
+      "name": "BW-ICASA-style-868-2026",
+      "country_code": "BW",
+      "regulator": "BOCRA",
+      "effective_date": "2026-01-01",
+      "regulator_url": "https://www.bocra.org.bw/",
+      "bands": [
+        {
+          "name": "Sub-GHz ISM 868",
+          "min_mhz": 863.0,
+          "max_mhz": 870.0,
+          "link_type_hint": "lora",
+          "max_eirp_dbm": 14.0,
+          "duty_cycle_pct_max": 1.0,
+          "bandwidth_khz_max": 250.0,
+          "license_class": "license_exempt",
+          "notes": "Operator-curated representation; verify against current BOCRA radio frequency plan before deployment."
+        }
+      ],
+      "notes": "ILLUSTRATIVE values for the seed scenario — DO NOT treat as authoritative regulatory advice. Spec §3.7 disclaims that regulatory_profile is operator-curated and advisory."
+    },
+    "enforce_regulatory": true,
+    "outputs": [
+      "geotiff",
+      "geojson_contours",
+      "lora_best_sf",
+      "stats",
+      "fidelity_tier_raster"
+    ],
+    "color_map": "lora_sf",
+    "mode": "auto"
+  },
+  "expected": {
+    "status_likely": ["COMPLETED", "PARTIAL"],
+    "fidelity_tier_dominant_minimum": "T1_TERRAIN",
+    "warnings_likely": [],
+    "warnings_possible": ["REGULATORY_LICENSE_NOTICE"],
+    "errors_must_not_occur": ["REGULATORY_LIMIT_EXCEEDED", "REGULATORY_BAND_UNCOVERED"],
+    "errors_possible_if_eirp_overspec": ["REGULATORY_LIMIT_EXCEEDED"],
+    "artifact_keys_present": [
+      "geotiff", "geojson_contours", "lora_best_sf", "stats", "fidelity_tier_raster"
+    ]
+  },
+  "notes": "Effective EIRP = `tx_power_dbm + tx_antenna.gain_dbi - tx_cable_loss_db`. The seed `lora-gateway-868-omni-6dbi` equipment is configured at 14 dBm + 6 dBi − 1 dB ≈ 19 dBm EIRP, which would *exceed* the inline profile's 14 dBm cap and cause `REGULATORY_LIMIT_EXCEEDED` to FAIL the run. Operators reproducing this scenario locally should either lower the cloned equipment's `tx_power_dbm` to 9 dBm or relax `enforce_regulatory` to demonstrate the advisory-only path. Pointing this at the failure path is intentional — the scenario doubles as a negative test for the regulatory enforcement code path."
+}

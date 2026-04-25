@@ -10,6 +10,8 @@ Bundled, system-owned, read-only catalog content. Loaded into the catalog DB and
 | [`antenna_patterns/`](antenna_patterns/) | Bundled antenna-pattern asset bytes (MSI Planet text format). Referenced by `Antenna.pattern_asset_ref` in the library above by `sha256:<hex>`. |
 | [`antenna_patterns/MANIFEST.txt`](antenna_patterns/MANIFEST.txt) | `filename TAB sha256 TAB size_bytes` for every bundled pattern. Used by the bootstrap step to register the bytes as Assets (§3.5) before catalog records are loaded. |
 | [`generate_patterns.py`](generate_patterns.py) | Reproduces the pattern files. Patterns are committed; the script is the build recipe, not a runtime dependency. |
+| [`scenarios/`](scenarios/) | Runnable analysis-request fixtures binding each operation (Op A–E) to a concrete conservation use case using only library entries. **Documentation/test fixtures, not catalog content** — not loaded at boot. |
+| [`test-vectors/`](test-vectors/) | Numerical input → expected-output triples for verifying engine implementations against documented formulas (free-space, polarization, cable-loss interpolation, frequency authority, full link budget). **Documentation/test fixtures, not catalog content.** |
 
 ## Boot sequence
 

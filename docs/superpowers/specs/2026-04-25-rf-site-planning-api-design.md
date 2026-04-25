@@ -576,9 +576,14 @@ The output system is **client-driven shaping** — the engine emits exactly what
 
 Artifacts are classified as **canonical** (stored to the per-class TTL) or **derivative** (generated on demand from canonicals; cached 24 h). When a run requests a derivative in `outputs[]`, it is materialized eagerly on submit; thereafter it is regenerated cheaply via `POST /v1/runs/{id}/artifacts:rederive` (§6.7) without re-running the propagation pipeline.
 
+**Artifact key naming.** When an operation produces multiple artifacts of the same kind, the artifact key is suffixed with a dotted discriminator:
+
+- **Per-link (Op C):** `<key>.<link_type>` — e.g., `geotiff.lora`, `link_budget.lte`, `stats.drone_c2`. Combined aggregates use `.combined` — e.g., `stats.combined`.
+- **Per-Tx (Op D):** `<key>.<tx_label>` using the labels from the `best_server_raster` JSON sidecar — e.g., `geotiff.A`, `geotiff.B`.
+
 | Artifact key | Class | Format | Content | Applicable ops |
 |---|---|---|---|---|
-| `link_budget` | canonical (JSON) | JSON | Full per-link breakdown: Tx power, Tx gain, cable loss, polarization mismatch (base, d, effective), free-space loss, terrain diffraction loss, clutter loss, building loss, total path loss, Rx gain, Rx feeder loss, received power, fade margin, link availability %, link result (pass/fail). One object per Tx-Rx pair. | A, B, C, D, E |
+| `link_budget` | canonical (JSON) | JSON | Full per-link breakdown: Tx power, Tx gain, cable loss, polarization mismatch (base, d, effective), free-space loss, terrain diffraction loss, clutter loss, building loss, total path loss, Rx gain, Rx feeder loss, received power, fade margin, link availability %, link result (pass/fail). **For Op A and per-link in Op C:** one object per Tx-Rx pair. **For Op B, D, E:** one Tx-side summary per Tx — component breakdown at the grid centroid; received power, fade margin, and availability reported as median / p5 / p95 across the grid (per-pixel detail lives in `geotiff` and `stats`). | A, B, C, D, E |
 | `path_profile` | canonical (JSON) | JSON or GeoJSON LineString | Sampled great-circle path with terrain/surface elevation, clutter class along the path, Fresnel zone radii, line-of-sight obstruction points. | A; available on request for others |
 | `geotiff` | canonical | GeoTIFF (LZW + predictor=3 by default; tiled, BIGTIFF when needed) | Single-band georeferenced raster of received signal (dBm) or path loss (dB). CRS configurable, default WGS84. | B, C, D, E (per altitude) |
 | `geotiff_stack` | derivative (from `voxel`, OR canonical when `voxel` not produced) | Multi-file or multi-band GeoTIFF | One raster per altitude slice for 3D operations. | E |

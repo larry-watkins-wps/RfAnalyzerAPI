@@ -1,10 +1,10 @@
 # Spec cleanup plan
 
-**Status:** Active — derived from the 2026-04-25 spec audit.
+**Status:** **Complete.** All 12 cleanup units retired in commit `2f03468` (2026-04-26). Cross-artifact validators green (`scripts/check-sync.py`).
 **Owner:** Larry Watkins.
-**Goal:** retire every BLOCKER/HIGH finding from the audit before implementation begins, and most MEDIUMs before the first sub-system lands. The spec stays at `Draft v2 — pending user review` until §12 (this plan) is fully checked off; at that point it can be promoted to `Draft v3 — ready to implement`.
+**Goal (achieved):** retire every BLOCKER/HIGH finding from the audit before implementation begins, plus most MEDIUMs. The spec status header (`Draft v2 — pending user review`) is **eligible for promotion** to `Draft v3 — ready to implement` — promotion is gated on user instruction per the working agreement in `CLAUDE.md`.
 
-The plan is structured as 12 ordered PRs in 5 phases. Each PR is small enough to ship in one cross-artifact sync pass (one commit, one re-run of the structural validators). Severity tags use the audit's labels.
+This plan was structured as 12 ordered fixes in 5 phases. They were ultimately landed in a single commit rather than 12 separate PRs (per user direction "no need for PRs, just fix them"). Severity tags use the audit's labels.
 
 ---
 
@@ -244,34 +244,42 @@ These three PRs close the remaining HIGH-severity contract holes — error model
 
 ---
 
-## Severity coverage check
+## Severity coverage — actual outcome
 
-After all 12 PRs land:
+After commit `2f03468`:
 
 | Severity | Audit count | Retired | Remaining |
-|---|---:|---:|---:|
+|---|---:|---:|---|
 | BLOCKER | 3 | 3 | 0 |
 | HIGH | 26 | 26 | 0 |
-| MEDIUM | 22 | ~20 | 2 (sandboxing — deferred to ADR-0002; standard library hash mutability long-tail) |
-| LOW | 13 | ~11 | 2 (cosmetic) |
+| MEDIUM | ~22 | ~20 | 2 (plugin sandboxing — deferred to ADR-0002; standard-library hash long-tail — by-design, documented in seed README) |
+| LOW | ~13 | ~11 | 2 (cosmetic — example payloads still reference placeholder Site / AOI names rather than real seed entries) |
 
-**Spec promotion gate:** when Phases 1–3 are complete, the spec status header can move from `Draft v2 — pending user review` to `Draft v3 — ready to implement`. Phases 4–5 can land in parallel with the first implementation milestone.
+The remaining MEDIUMs and LOWs are intentional / deferred — they do not block implementation.
+
+**Spec promotion gate (reached, not exercised):** Phases 1–3 are complete, so the spec status header is eligible to move from `Draft v2 — pending user review` to `Draft v3 — ready to implement`. Per the working agreement in `CLAUDE.md`, the status header is not bumped without explicit user instruction. Phases 4–5 are also complete in this same commit, so the entire plan is retired.
 
 ---
 
 ## Tracking
 
-Tick the boxes as PRs land. Each PR's commit message should reference the PR number from this plan.
+All units retired in commit `2f03468`. Validators green.
 
-- [ ] PR 1 — AOIPack reconciliation
-- [ ] PR 2 — Scenario fixes + PMR-446 seed
-- [ ] PR 3 — vhf_telemetry plugin propagation
-- [ ] PR 4 — Op A outputs + Op E shape + altitude naming
-- [ ] PR 5 — Pluggable contracts (PathLossResult, link_budget, lifecycle, scenario table)
-- [ ] PR 6 — Reproducibility (canonicalization, asset GC, multipart refresh)
-- [ ] PR 7 — Error/filter codes + missing endpoints + webhooks + scopes
-- [ ] PR 8 — Coordinate / projection / antimeridian / polar / datum / slant-45
-- [ ] PR 9 — Long-running jobs (timeouts, checkpointing, resume)
-- [ ] PR 10 — Seed library corrections
-- [ ] PR 11 — Hash format + entity count + canonical-vs-derivative drift
-- [ ] PR 12 — `scripts/check-sync.py` + CI
+- [x] PR 1 — AOIPack reconciliation
+- [x] PR 2 — Scenario fixes + PMR-446 seed
+- [x] PR 3 — vhf_telemetry plugin propagation
+- [x] PR 4 — Op A outputs + Op E shape + altitude naming
+- [x] PR 5 — Pluggable contracts (PathLossResult, link_budget, lifecycle, scenario table)
+- [x] PR 6 — Reproducibility (canonicalization, asset GC, multipart refresh)
+- [x] PR 7 — Error/filter codes + missing endpoints + webhooks + scopes
+- [x] PR 8 — Coordinate / projection / antimeridian / polar / datum / slant-45
+- [x] PR 9 — Long-running jobs (timeouts, checkpointing, resume)
+- [x] PR 10 — Seed library corrections
+- [x] PR 11 — Hash format + entity count + canonical-vs-derivative drift
+- [x] PR 12 — `scripts/check-sync.py` + CI
+
+## Carry-forward items (out of scope for this cleanup pass)
+
+- **ADR-0002 — plugin sandboxing.** Required before onboarding third-party plugins. Tracked as an action item in [ADR-0001](adr/0001-stack.md#action-items).
+- **Canonicalization golden vector hash.** [`seed/test-vectors/canonicalization-vector.json`](superpowers/specs/seed/test-vectors/canonicalization-vector.json) carries a placeholder `expected_sha256`. The first conformant RFC 8785 implementation should compute the real hash and replace the placeholder; subsequent implementations must match.
+- **Worked-example placeholder catalog entries.** The five `op-*.md` examples reference invented Site / AOI / Equipment names (e.g., `olifants-dock`, `kruger-north-2026q1`, `dji-dock-2-c2-2_4ghz`) that don't exist in the seed library. This is documented in the example README as intentional. A future polish pass could swap them for real seed entries.

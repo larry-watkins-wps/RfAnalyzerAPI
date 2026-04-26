@@ -27,16 +27,16 @@ The constraints that shape the choice:
 | Language / runtime | **Python 3.12** | First-class numerical/raster ecosystem (numpy, scipy, rasterio, pyproj, shapely, xarray, netCDF4). Same language as ITU-R reference implementations. |
 | Web framework | **FastAPI + uvicorn** | Native async, OpenAPI emission from pydantic, request-binding is inspectable. |
 | Worker model | **Separate process, polls Postgres `runs` table via `SELECT … FOR UPDATE SKIP LOCKED`** | The Run record IS the job (§8.1); no external queue infrastructure to keep in sync with Run state. |
-| Validation | **pydantic v2** | Models double as runtime types and OpenAPI source. The hand-maintained spec markdown / JSON Schema / OpenAPI artifacts in `docs/superpowers/specs/` remain canonical until implementation; once implementation begins, pydantic-emitted OpenAPI is checked against the spec-derived OpenAPI in CI. |
+| Validation | **pydantic v2**, **rfc8785** for JCS canonicalization | Models double as runtime types and OpenAPI source. The hand-maintained spec markdown / JSON Schema / OpenAPI artifacts in `docs/superpowers/specs/` remain canonical until implementation; once implementation begins, pydantic-emitted OpenAPI is checked against the spec-derived OpenAPI in CI. The `inputs_resolved_sha256` canonicalization (spec §3.3) MUST use the `rfc8785` Python library (or a binary-equivalent strict RFC 8785 implementation); hand-rolled JCS encoders are not permitted. |
 | Package manager | **uv** | Fast resolver, lockfile-pinned, single binary, virtualenv-managed. |
 | Lint / format | **ruff** (lint + format) | One tool, fast, replaces black + isort + flake8 + most of pylint. |
 | Type-check | **mypy --strict** on `src/`, **basedpyright** as fallback for IDE | Strict typing catches the kind of polymorphic-request-body bugs §4.0's Op A–E shapes invite. |
 | Tests | **pytest + pytest-asyncio + hypothesis + Schemathesis** | hypothesis for property tests over Op A–E request shapes; Schemathesis to fuzz the live API against the published OpenAPI (catches drift between spec-derived OpenAPI and implementation behavior). |
-| Logging | **structlog**, JSON in prod, key-redaction list mirroring argus-flight-center's `src/lib/logger.ts` | Same field shape across both services makes a single log aggregator viable. |
+| Logging | **structlog**, JSON in prod; explicit key-redaction set per [ADR-0002](0002-argus-alignment-and-auth.md) (case-insensitive exact match, recurse 5 levels, replace with `[REDACTED]`) | Same field shape across both services makes a single log aggregator viable. |
 | Observability | **OpenTelemetry** (traces + metrics) | One span per pipeline stage (§4.1) is the minimum useful granularity for debugging long Runs. |
-| State DB | **Postgres 16** (PostGIS extension deferred — no spatial-query endpoint in v1) | Same DB as argus; well-understood operationally; SKIP LOCKED is the queue. |
+| State DB | **`postgis/postgis:16-3.4`** (PostGIS extension mandatory — see [ADR-0002](0002-argus-alignment-and-auth.md)) | Same image as argus; well-understood operationally; SKIP LOCKED is the queue. |
 | Object store | **Filesystem (dev/local)** ↔ **S3/Azure Blob (prod)** behind a `StorageProvider` interface, switched by `STORAGE_PROVIDER` env var | Pattern copied verbatim from argus-flight-center's `src/lib/storage.ts`. Local-mode parity per §8.5. |
-| Auth | **Single header API key** (`X-Api-Key`) with per-operation scope checks (§8.4) | Single-tenant compute API; OAuth/JWT/cookie session is the wrong model. |
+| Auth | **`Authorization: Bearer <api-key>`**, hashed at rest with argon2id, prefix-indexed — see [ADR-0002](0002-argus-alignment-and-auth.md). Per-operation scope checks (§8.4). | Single-tenant compute API; OAuth/JWT/cookie session is the wrong model; bearer wire format matches argus. |
 | HTTP outbound (webhook delivery, plugin fetch) | **httpx** with explicit timeouts + tenacity for retries | No bare `fetch`-style "fail silent and return null" calls. |
 | Plugin loading | **Python entry points** (`importlib.metadata`) for both propagation models and link-type plugins | Stdlib mechanism, no custom plugin loader to maintain. Sandboxing deferred to a future ADR. |
 | Containerization | Multi-stage Dockerfile (slim base, no compile toolchain in runtime layer); Docker Compose for dev with services: api, worker, postgres, minio | Mirrors argus's compose layout where the services overlap (postgres, minio). |
@@ -86,10 +86,10 @@ Rejected. FastAPI is the de-facto standard for pydantic-backed Python APIs; the 
 
 ## Action items
 
-1. [ ] Add `pyproject.toml` with the dependency set above; pin the toolchain in `.python-version`.
+1. [ ] Add `pyproject.toml` with the dependency set above (including `rfc8785` for JCS canonicalization); pin the toolchain in `.python-version`.
 2. [ ] Stand up the repo skeleton: `src/rfanalyzer/{api,pipeline,models,plugins,storage,auth}/`, `tests/`, `docker/`.
 3. [ ] Wire CI: lint → typecheck → unit → integration → Schemathesis fuzz.
 4. [ ] Create the `StorageProvider` interface with filesystem and S3 implementations (mirror argus's `src/lib/storage.ts` shape).
 5. [ ] Set up the OpenAPI emission check: pydantic-emitted OpenAPI is diffed against the spec-derived OpenAPI; CI fails on divergence.
 6. [ ] Publish the first generated TS client to a private registry and add it as a dependency in argus-flight-center.
-7. [ ] Open ADR-0002 covering plugin sandboxing once the first third-party plugin candidate appears.
+7. [ ] Plugin sandboxing ADR — open once the first third-party plugin candidate appears (note: the auth, Postgres-image, and logging-redaction items previously listed here are answered by [ADR-0002](0002-argus-alignment-and-auth.md); see ADR-0002's own action items for the implementation tasks).

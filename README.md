@@ -105,13 +105,7 @@ Bundled global baseline (SRTM-30 DTM, ESA WorldCover land-cover) plus the [stand
 Structured JSON logs per request and per pipeline stage; Prometheus-style metrics (runs by status/operation, queue depth, worker stage timings, artifact-store bytes, GC sweep stats); per-Run trace retrievable from the Run record; `/healthz` (process liveness) and `/readyz` (dependency reachability).
 
 ### Error & warning catalog (spec Appendix D)
-Every machine-readable code is enumerated:
-
-- **Errors** — request rejections and run failures (`RX_TX_FREQ_MISMATCH`, `OP_C_RX_TEMPLATE_MISSING`, `FIDELITY_FLOOR_NOT_MET`, `IDEMPOTENCY_KEY_BODY_MISMATCH`, `STORAGE_QUOTA_EXCEEDED`, `LAYER_GONE`, etc.)
-- **Warnings** — PARTIAL completions (`FIDELITY_DEGRADED`, `MODEL_OUT_OF_NOMINAL_FREQ`, `CLUTTER_TABLE_TAXONOMY_FALLBACK`, `POLARIZATION_DEFAULTED`, `DSM_GAP`, `FETCHED_LAYER_PARTIAL`, `RESOLUTION_EXCEEDS_DATA`)
-- **Filter reasons** — informational, on PvO and grid sampling (`OBSERVED_METRIC_MISMATCH`, `OBSERVATION_OUT_OF_GEOMETRY`, `OBSERVATION_OUT_OF_FREQ_TOLERANCE`)
-
-These codes are mirrored verbatim in the OpenAPI `ProblemDetail.code` enum so clients can branch programmatically.
+Every machine-readable code is enumerated in spec [Appendix D](docs/superpowers/specs/2026-04-25-rf-site-planning-api-design.md#appendix-d--warnings-errors-filter-reasons), grouped into **errors** (request rejections and run failures), **warnings** (PARTIAL completions), and **filter reasons** (informational, on PvO and grid sampling). The codes are mirrored verbatim in the OpenAPI `ProblemDetail.code` and `ProblemDetail.warnings[].code` enums and in the `FilterReason.code` enum so clients can branch programmatically. Appendix D is the authoritative list — this README does not duplicate it.
 
 ## Conventions
 

@@ -99,6 +99,11 @@
     },
 
     "Polarization":     { "type": "string", "enum": ["V", "H", "RHCP", "LHCP", "slant-45", "dual"] },
+    "SlantOrientationDeg": {
+      "type": ["integer", "null"],
+      "enum": [0, 90, null],
+      "description": "Mechanical orientation of a slant-45 antenna (0 = +45°, 90 = −45°). Only meaningful when polarization is `slant-45`. When null/unspecified the engine treats slant-45 vs slant-45 as worst-case 20 dB cross-pol with `POLARIZATION_DEFAULTED` warning (spec §4.5)."
+    },
     "LinkType": {
       "type": "string",
       "minLength": 1,
@@ -207,10 +212,18 @@
         "h_beamwidth_deg":          { "type": "number" },
         "v_beamwidth_deg":          { "type": "number" },
         "electrical_downtilt_deg":  { "type": "number" },
+        "slant_polarization_orientation_deg": { "$ref": "#/$defs/SlantOrientationDeg" },
         "format":                   { "type": "string", "enum": ["msi", "adf", "ant", "csv"] },
         "pattern_asset_ref":        { "$ref": "#/$defs/AssetId" }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if":   { "properties": { "polarization": { "const": "slant-45" } }, "required": ["polarization"] },
+          "then": { "properties": { "slant_polarization_orientation_deg": { "$ref": "#/$defs/SlantOrientationDeg" } } },
+          "else": { "properties": { "slant_polarization_orientation_deg": { "type": "null" } } }
+        }
+      ]
     },
 
     "InlineEquipmentProfile": {
@@ -316,7 +329,7 @@
     "InlineOperatingVolume": {
       "type": "object",
       "description": "A 3D region of interest for volumetric coverage analysis (spec §3.2). Drone flight envelope is the primary use case; also covers tower vertical-pattern surveys, tethered-balloon links, and any other case needing per-altitude evaluation.",
-      "required": ["altitude_min_m_agl", "altitude_max_m_agl"],
+      "required": ["altitude_min_m", "altitude_max_m"],
       "oneOf": [
         { "required": ["bbox"] },
         { "required": ["polygon"] }
@@ -325,8 +338,9 @@
         "name":                  { "type": "string" },
         "bbox":                  { "$ref": "#/$defs/Bbox" },
         "polygon":               { "$ref": "#/$defs/Polygon" },
-        "altitude_min_m_agl":    { "type": "number", "minimum": 0 },
-        "altitude_max_m_agl":    { "type": "number", "minimum": 0 },
+        "altitude_min_m":        { "type": "number", "minimum": 0 },
+        "altitude_max_m":        { "type": "number", "minimum": 0 },
+        "altitude_reference":    { "$ref": "#/$defs/AltitudeReference", "default": "agl" },
         "altitude_step_m":       { "type": "number", "exclusiveMinimum": 0 },
         "duration_estimate_min": { "type": "number" },
         "home_site_ref":         { "$ref": "#/$defs/Reference", "description": "Return-to-home / launch-recovery anchor (drone-specific semantics)." },

@@ -25,7 +25,7 @@ Companion to spec §4.0 (Op E), §6.1 (voxel canonical), §6.6 (slicing).
 }
 ```
 
-`operating_volume` is a Reference; alternatively the caller could inline `{ bbox, polygon, altitude_min_m_agl, altitude_max_m_agl, altitude_step_m, home_site_ref? }`. The Operating Volume's altitude range × `altitude_step_m` define the voxel's altitude axis. (`home_site_ref` is optional; here `olifants-flight-envelope-2026q1` already pins the dock as its home Site.)
+`operating_volume` is a Reference; alternatively the caller could inline `{ bbox, polygon, altitude_min_m, altitude_max_m, altitude_reference, altitude_step_m, home_site_ref? }`. The Operating Volume's altitude range × `altitude_step_m` define the voxel's altitude axis. (`home_site_ref` is optional; here `olifants-flight-envelope-2026q1` already pins the dock as its home Site.)
 
 `min_fidelity_tier: T3_SURFACE` requires the AOI Pack to include DSM; if it doesn't, the run fails fast with `FIDELITY_FLOOR_NOT_MET` (§5.4).
 

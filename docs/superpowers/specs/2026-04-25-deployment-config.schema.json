@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfanalyzer.local/schemas/deployment-config.schema.json",
+  "title": "RF Site Planning API — Deployment Configuration",
+  "description": "Single source of truth for every operator-tunable knob referenced anywhere in spec v2. Keys here have no effect outside the deployment and are NEVER returned in API responses (Appendix E.4 explicitly forbids returning `restricted_species_polygons`). Defaults match the spec; an empty config object accepts every default. The schema is exhaustive: any knob mentioned in the spec as 'deployment-configurable', 'operator-set', 'per-deployment', or referenced as a default (`default ...`) appears here. Adding a new knob requires the same cross-artifact-sync discipline as adding a spec primitive.",
+
+  "type": "object",
+  "additionalProperties": false,
+
+  "properties": {
+
+    "mode_routing": {
+      "type": "object",
+      "description": "Sync vs async routing thresholds (spec §2.3).",
+      "additionalProperties": false,
+      "properties": {
+        "auto_async_cell_threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 250000,
+          "description": "Estimated output cell count above which `mode: auto` selects async."
+        },
+        "auto_async_area_km2": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 100,
+          "description": "Declared geometry area above which `mode: auto` selects async."
+        },
+        "sync_budget_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 25,
+          "description": "Sync HTTP response budget; on overrun the request is auto-promoted to async with HTTP 202."
+        }
+      }
+    },
+
+    "idempotency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_window_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 7,
+          "description": "How long Idempotency-Key + key_id reuse returns the prior Run (spec §2.3)."
+        }
+      }
+    },
+
+    "webhooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "webhook_verification_ttl_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "How long a verified webhook URL skips the registration-challenge handshake (spec §2.4)."
+        },
+        "webhook_secret_rotation_grace_hours": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 24,
+          "description": "Hours after secret rotation during which the old secret is also accepted (spec §2.4)."
+        },
+        "webhook_max_retry_attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 6,
+          "description": "Webhook retry attempts on non-2xx (spec §2.4)."
+        },
+        "webhook_retry_window_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Total bounded window for webhook retries (spec §2.4)."
+        },
+        "opsec_authorized_webhook_urls": {
+          "type": "array",
+          "items": { "type": "string", "format": "uri" },
+          "description": "Allowlist of webhook URLs cleared to receive `restricted_species` deliveries (Appendix E.2). Webhook delivery for restricted_species runs is suppressed unless the target is on this list."
+        }
+      }
+    },
+
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "asset_orphan_ttl_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 7,
+          "description": "Days an asset with zero references is retained before purge (spec §3.5)."
+        },
+        "multipart_session_ttl_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 24,
+          "description": "Hours after `:initiate` before an incomplete multipart upload is aborted (spec §3.5)."
+        }
+      }
+    },
+
+    "runs": {
+      "type": "object",
+      "description": "Per-Run lifecycle, retention, and resource limits (spec §8.1, §8.2).",
+      "additionalProperties": false,
+      "properties": {
+        "per_op_timeouts_seconds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "p2p":        { "type": "integer", "minimum": 1, "default": 60 },
+            "area":       { "type": "integer", "minimum": 1, "default": 1800 },
+            "multi_link": { "type": "integer", "minimum": 1, "default": 1800 },
+            "multi_tx":   { "type": "integer", "minimum": 1, "default": 3600 },
+            "voxel":      { "type": "integer", "minimum": 1, "default": 14400 },
+            "global_ceiling": { "type": "integer", "minimum": 1, "default": 86400, "description": "Hard ceiling regardless of per-op configuration (spec §8.1)." }
+          }
+        },
+        "cancellation_check_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 5,
+          "description": "Worst-case cancellation latency target. The 60 s hard ceiling in §8.1 caps this."
+        },
+        "max_pinned_runs_per_key": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100,
+          "description": "Pin cap per key; Comparison creation that exceeds this is rejected with 409 PINNED_RUN_CAP_WOULD_BE_EXCEEDED (spec §8.2)."
+        },
+        "storage_quota_bytes_per_key": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10737418240,
+          "description": "Per-key storage quota, in bytes. 0 disables the quota (spec §8.2)."
+        },
+        "tile_size_px": {
+          "type": "integer",
+          "minimum": 64,
+          "default": 256,
+          "description": "Tile granularity for Op B/D checkpointing (spec §8.1)."
+        },
+        "retention_ttls": {
+          "type": "object",
+          "description": "Per-class canonical artifact TTLs in days (spec §8.2).",
+          "additionalProperties": false,
+          "properties": {
+            "geotiff_2d_days":           { "type": "integer", "minimum": 1, "default": 30 },
+            "best_server_raster_days":   { "type": "integer", "minimum": 1, "default": 30 },
+            "fidelity_tier_raster_days": { "type": "integer", "minimum": 1, "default": 30 },
+            "voxel_days":                { "type": "integer", "minimum": 1, "default": 7 },
+            "derivative_cache_hours":    { "type": "integer", "minimum": 1, "default": 24 }
+          }
+        }
+      }
+    },
+
+    "opsec": {
+      "type": "object",
+      "description": "Operational sensitivity / redaction policy (spec Appendix E).",
+      "additionalProperties": false,
+      "properties": {
+        "default_sensitivity_class": {
+          "type": "string",
+          "enum": ["public", "org_internal", "location_redacted", "restricted_species"],
+          "default": "org_internal",
+          "description": "Class assigned when a submission omits `sensitivity_class` (Appendix E.3)."
+        },
+        "require_explicit_classification_in_polygon": {
+          "type": "boolean",
+          "default": false,
+          "description": "Strict mode: submissions whose geometry intersects a restricted_species polygon must declare the class explicitly (Appendix E.3)."
+        },
+        "redaction_grid_cell_size_m": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1000,
+          "description": "Coordinate-snap grid for `location_redacted` redaction (Appendix E.2). AOI bboxes are snapped to 5× this size."
+        },
+        "restricted_species_polygons": {
+          "type": "array",
+          "description": "Deployment-only policy data; never returned via the API. Polygons that auto-promote intersecting submissions to `restricted_species` (Appendix E.4).",
+          "items": {
+            "type": "object",
+            "required": ["id", "polygon"],
+            "additionalProperties": false,
+            "properties": {
+              "id":             { "type": "string", "minLength": 1 },
+              "polygon":        { "type": "object", "description": "GeoJSON Polygon, [lon, lat] order." },
+              "species_code":   { "type": "string" },
+              "notes":          { "type": "string" },
+              "effective_from": { "type": "string", "format": "date-time" },
+              "effective_to":   { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+
+    "auth": {
+      "type": "object",
+      "description": "Auth adapter configuration (spec §8.4, ADR-0002).",
+      "additionalProperties": false,
+      "properties": {
+        "bearer_key_store": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["driver"],
+          "properties": {
+            "driver": {
+              "type": "string",
+              "enum": ["postgres"],
+              "default": "postgres",
+              "description": "v1 stores bearer-key hashes in the same Postgres instance as the Run record (ADR-0002)."
+            },
+            "argon2id": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Argon2id parameters for hashing API keys (ADR-0002).",
+              "properties": {
+                "memory_kib":  { "type": "integer", "minimum": 8192,  "default": 65536 },
+                "iterations":  { "type": "integer", "minimum": 1,      "default": 3 },
+                "parallelism": { "type": "integer", "minimum": 1,      "default": 4 }
+              }
+            },
+            "prefix_index_chars": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 16,
+              "default": 8,
+              "description": "Number of leading characters of the bearer key used as the lookup index (ADR-0002)."
+            }
+          }
+        },
+        "rate_limit_classes": {
+          "type": "object",
+          "description": "Map of `rate_limit_class` name → bucket parameters. Keys land here from the auth adapter's `Principal.rate_limit_class` (spec §8.4).",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "sustained_per_minute": { "type": "integer", "minimum": 1 },
+              "burst":                { "type": "integer", "minimum": 1 },
+              "concurrent_run_cap":   { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    },
+
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plugin_order": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Equivalent to the RFANALYZER_PLUGIN_ORDER environment variable: comma-separated entry-point names that load before the alphabetical default. Used to break tie-breaks for auto-select (spec §4.2, §4.4, §4.6)."
+        },
+        "auto_select_tiebreak_preference": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Auto-select tiebreak preference order on equal `scenario_suitability` score (spec §4.4 step 5)."
+        }
+      }
+    },
+
+    "geo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "polar_threshold_lat_deg": {
+          "type": "number",
+          "default": 85,
+          "description": "Absolute latitude beyond which polar projection (EPSG:3413/3031) is used and POLAR_PROJECTION_DEGRADED is emitted (spec §5.5)."
+        },
+        "fetched_layer_upstreams": {
+          "type": "object",
+          "description": "Map of layer kind → upstream provider config (spec §5.3). Required only if the deployment supports `source: fetched` AOI Pack creation.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "url":     { "type": "string", "format": "uri" },
+              "auth":    { "type": "string" },
+              "version": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "storage": {
+      "type": "object",
+      "description": "StorageProvider switch (ADR-0001, mirrored from argus-flight-center's `src/lib/storage.ts`).",
+      "required": ["provider"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["filesystem", "s3", "azure_blob"],
+          "default": "filesystem",
+          "description": "Selected by the STORAGE_PROVIDER env var; this field documents the resolved value."
+        },
+        "filesystem_root":   { "type": "string", "description": "Absolute host path; required when provider=filesystem." },
+        "s3_bucket":         { "type": "string" },
+        "s3_region":         { "type": "string" },
+        "azure_container":   { "type": "string" },
+        "azure_account":     { "type": "string" }
+      }
+    },
+
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "redaction_keys": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Per ADR-0002. Exact-key match, case-insensitive, recursive 5 levels. Operators may extend the default set but should not shrink it.",
+          "default": [
+            "authorization", "cookie", "password", "secret",
+            "api_key", "apikey", "api_secret", "apisecret",
+            "token", "access_token", "refresh_token", "id_token", "session_token",
+            "bearer", "password_hash",
+            "accessToken", "refreshToken", "idToken", "sessionToken",
+            "apiKey", "apiSecret", "passwordHash"
+          ]
+        }
+      }
+    }
+  }
+}

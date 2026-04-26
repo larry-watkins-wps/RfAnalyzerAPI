@@ -34,8 +34,9 @@
           [31.25, -23.55]
         ]]
       },
-      "altitude_min_m_agl": 60,
-      "altitude_max_m_agl": 150,
+      "altitude_min_m": 60,
+      "altitude_max_m": 150,
+      "altitude_reference": "agl",
       "altitude_step_m": 10,
       "home_site_ref": { "ref": "dock-candidate-north-ridge" }
     },

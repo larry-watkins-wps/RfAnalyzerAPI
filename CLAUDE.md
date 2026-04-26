@@ -30,7 +30,7 @@ Fixed by [ADR-0001](docs/adr/0001-stack.md): **Python 3.12 + FastAPI + pydantic 
 - **The Run record IS the job.** Workers consume SUBMITTED runs via Postgres `SELECT … FOR UPDATE SKIP LOCKED`. No Redis/RabbitMQ/Celery.
 - **One pipeline stage = one module** under `src/rfanalyzer/pipeline/stage_NN_*.py`. One OpenTelemetry span per stage.
 - **Storage is abstracted behind a `StorageProvider` interface** with `STORAGE_PROVIDER` env switch (filesystem / S3 / Azure Blob). Pattern mirrors argus-flight-center's `src/lib/storage.ts`.
-- **Logging field shape mirrors argus-flight-center** for cross-service log aggregation. Use `structlog`; redact `authorization|cookie|password|secret|api_key|*token`.
+- **Logging field shape mirrors argus-flight-center** for cross-service log aggregation. Use `structlog`; redaction follows the explicit case-insensitive key set defined in [ADR-0002 §3](docs/adr/0002-argus-alignment-and-auth.md) — exact-name match, recurse 5 levels, replace with literal `[REDACTED]`. Operators tune the set via `logging.redaction_keys` in the deployment-config schema.
 - **Generated TypeScript client is the contract argus consumes.** Use `openapi-typescript` + `openapi-fetch`; never hand-write a client.
 - **Plugins load via Python entry points** (`importlib.metadata`). In-process. Sandboxing is deferred to a future ADR — until that lands, do not onboard third-party plugins.
 

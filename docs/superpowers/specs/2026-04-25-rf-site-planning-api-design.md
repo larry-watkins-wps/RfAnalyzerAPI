@@ -146,7 +146,7 @@ sequenceDiagram
 
 - Async submissions MAY include `webhook_url`. The orchestrator POSTs to it on terminal-state transitions.
 - Payload: `{run_id, status, signed_at, artifacts_url, warnings, error}`. `signed_at` is RFC 3339 UTC.
-- **Signing.** Header `X-Signature: HMAC-SHA256(secret, signed_at + "." + body)`. Receivers MUST reject `signed_at` deltas > 5 minutes from local time.
+- **Signing.** Header `X-Signature: HMAC-SHA256(secret, signed_at + "." + body)` where `body` is the **exact bytes the receiver gets** off the wire — receivers MUST NOT re-canonicalize, re-serialize, or otherwise normalize the payload before computing the HMAC, as proxies that re-emit JSON with different whitespace, key ordering, or numeric forms invalidate the signature. To keep signatures stable across proxies, servers MUST emit webhook payload bodies as **compact JSON** (no insignificant whitespace, UTF-8, no trailing newline). Receivers MUST reject `signed_at` deltas > 5 minutes from local time.
 - **Registration challenge.** First time a `webhook_url` is seen for a tenant, the orchestrator POSTs `{challenge: <random>}` and requires the URL to echo it back within 5 seconds. URLs that fail challenge are rejected. Subsequent submissions to a verified URL skip the challenge for `webhook_verification_ttl_days` (default **30**).
 - **Secret rotation.** `POST /v1/webhooks/secrets:rotate` produces a new secret. Both old and new are accepted for **24 h** so receivers can roll over without downtime.
 - Delivery retried with exponential backoff on non-2xx for a bounded window (default 6 attempts over 1 hour).
@@ -214,7 +214,7 @@ sequenceDiagram
 | **Equipment Profile** | `name`, `radio_ref`, `antenna_ref`, `mount_height_m_agl`, `cable_loss_db` | `cable_loss_curve: [{freq_mhz, loss_db}]` (overrides scalar via piecewise-linear interpolation), `azimuth_deg`, `mechanical_downtilt_deg`, `mfr`, `model`, `notes` | Deployable bundle of radio + antenna + mounting. `cable_loss_db` is evaluated at the bound radio's center frequency. |
 | **AOI Pack** | `name`, `bbox` (south, west, north, east) | `layers: { dtm: AOILayer, dsm: AOILayer, clutter: AOILayer, buildings: AOILayer }` (each `AOILayer` carries `source` ∈ `bundled/byo/fetched`, `asset_ref`, `upstream_source`, `upstream_version`, `acquired_at`, `content_sha256`, `resolution_m`); plus pack-level `clutter_table_ref`, `resolution_m`, `notes`, `tags[]` | Region with attached geo-data layers. Per-layer provenance fields (§5.3). |
 | **ClutterTable** | `name`, `taxonomy_id`, `class_table` (mapping class_id → `{label?, attenuation_db_per_band: {anchor_freq_mhz_str → dB per 100 m of path}, depolarization_factor: 0..1, notes?}`) | `applicable_freq_bands`, profile-level `notes` | Per-class attenuation table. Per-class `depolarization_factor` is consumed by polarization mismatch (§4.5). The engine accumulates attenuation linearly along path segments and interpolates linearly in dB between declared anchor frequencies; outside the anchor range it falls back to the nearest anchor. |
-| **Operating Volume** | `name`, `bbox` *or* `polygon`, `altitude_min_m_agl`, `altitude_max_m_agl` | `altitude_step_m`, `duration_estimate_min`, `home_site_ref`, `host_site_ref`, `notes` | A 3D region of interest for volumetric coverage analysis. Drone-flight-envelope is the primary use case (Op E with `home_site_ref` pointing at the drone dock or launch site); also covers tower vertical-pattern surveys, tethered-balloon links, and any other case needing per-altitude evaluation. `home_site_ref` names a return-to-home / launch-recovery anchor (drone-specific semantics). `host_site_ref` names the operational anchor for non-recovering deployments. Both are optional and orthogonal — typically the same Site, sometimes different, sometimes neither. |
+| **Operating Volume** | `name`, `bbox` *or* `polygon`, `altitude_min_m`, `altitude_max_m`, `altitude_reference` | `altitude_step_m`, `duration_estimate_min`, `home_site_ref`, `host_site_ref`, `notes` | A 3D region of interest for volumetric coverage analysis. Drone-flight-envelope is the primary use case (Op E with `home_site_ref` pointing at the drone dock or launch site); also covers tower vertical-pattern surveys, tethered-balloon links, and any other case needing per-altitude evaluation. Altitudes pair with the entity-level `altitude_reference` (`agl` \| `amsl`). `home_site_ref` names a return-to-home / launch-recovery anchor (drone-specific semantics). `host_site_ref` names the operational anchor for non-recovering deployments. Both are optional and orthogonal — typically the same Site, sometimes different, sometimes neither. |
 | **Measurement Set** | `name`, `points[]` where each `= {lat, lon, altitude_m, altitude_reference, freq_mhz, observed_signal_dbm, observed_metric, timestamp, source}` | `ordered: bool` (default `false`; tracks set this `true`), per-point `seq: int` (when `ordered`), `device_ref`, `site_ref` *or* `aoi_ref`, `sensitivity_class` (Appendix E), `notes`, per-point `bandwidth_khz`, `uncertainty_db`, `tags` | Stored field RSSI/RSRP observations. A point cloud (camera traps) by default; tracks set `ordered: true` and supply `seq` per point. |
 | **Comparison / Plan** | `name`, `run_ids[]` | `notes`, `winner_run_id`, `decision_rationale`, `decided_at` | Captures a real placement decision with the runs that informed it. |
 | **Regulatory Profile** | `name`, `country_code` (ISO-3166-1 alpha-2), `regulator`, `bands[]` (each `min_mhz`, `max_mhz`, `max_eirp_dbm`, `license_class ∈ {license_exempt, license_required, permit_required, prohibited}`) | per-band `link_type_hint`, `duty_cycle_pct_max`, `bandwidth_khz_max`, `notes`; profile-level `effective_date`, `superseded_at`, `regulator_url`, `reference_doc_asset_ref`, `notes` | Per-jurisdiction band/EIRP/license-class constraints. Referenced from analysis requests via `regulatory_profile_ref`; the engine validates each Tx's effective EIRP and frequency against the matching band at Stage 2 (§4.1) and emits `REGULATORY_*` codes per the request's `enforce_regulatory` flag (§3.7, Appendix D). **Advisory only — does not constitute licensing advice (§1 out of scope).** |
@@ -227,11 +227,11 @@ A Run is a first-class persisted record but not a catalog entity (no name-based 
 - `operation` (`p2p` / `area` / `multi_link` / `multi_tx` / `voxel`)
 - `mode_requested` (`sync` / `async` / `auto`), `mode_executed` (`sync` / `async`)
 - `inputs_resolved` — frozen, fully-inlined snapshot of every reference at the freeze point
-- `inputs_resolved_sha256` — SHA-256 of the **canonicalized** `inputs_resolved`, used by opt-in dedup (§8.2) and by replay/idempotency comparisons. Canonicalization rule: **RFC 8785 (JSON Canonicalization Scheme — JCS)**. Specifically: UTF-8 encoding, NFC string normalization, lexicographic key ordering, no insignificant whitespace, JSON Number serialization per JCS §3.2.2.3 (which forces a canonical double-to-string form for all floats — operators that round-trip floats through alternative serializers will produce a different hash). A golden vector for the canonicalization rule lives at [`seed/test-vectors/canonicalization-vector.json`](seed/test-vectors/canonicalization-vector.json).
+- `inputs_resolved_sha256` — SHA-256 of the **canonicalized** `inputs_resolved`, used by opt-in dedup (§8.2) and by replay/idempotency comparisons. Canonicalization rule: **RFC 8785 (JSON Canonicalization Scheme — JCS)**. Specifically: UTF-8 encoding, NFC string normalization, lexicographic key ordering, no insignificant whitespace, JSON Number serialization per JCS §3.2.2.3 (which forces a canonical double-to-string form for all floats — operators that round-trip floats through alternative serializers will produce a different hash). Implementations MUST use `rfc8785` (the Python reference implementer of RFC 8785) or a binary-equivalent strict RFC 8785 library; rolling a JCS encoder by hand is not permitted. A golden vector for the canonicalization rule lives at [`seed/test-vectors/canonicalization-vector.json`](seed/test-vectors/canonicalization-vector.json); the `expected_sha256` carried there is a placeholder pending the first conformant implementation, which fills it from a real run of the chosen library — every subsequent implementation MUST match the same hash for the same `input` payload.
 - `engine_version`, `engine_major`, `models_used[]` (with model plugin versions and `plugin_major` per entry), `data_layer_versions`
 - `fidelity_tier_dominant`, `fidelity_tier_min`, `fidelity_tier_max`, `fidelity_tier_max_possible`
 - `output_artifact_refs[]` — see §8.9 for shape
-- `warnings[]`, `error` (if failed) — codes per Appendix D
+- `warnings[]`, `error` (if failed) — codes per Appendix D. `error` is a `RunError` record `{code, detail, plugin?, stage?, cause_chain?}` (OpenAPI `RunError` schema), not a `ProblemDetail` — the latter is the HTTP-response shape and carries an HTTP `status` field that has no meaning for a stored Run failure.
 - `pinned` (boolean; suppresses canonical-artifact TTL expiry)
 - `cancellation_reason` (`user` | `expired` | null) — `sync_budget_exceeded` is intentionally **not** a Run cancellation reason; it appears only on the HTTP response when a sync request is auto-promoted to async, while the underlying Run continues normally to its own terminal state (§8.1).
 - `comparison_ids[]` — every Comparison referencing this Run (a Run may be cited by multiple Comparisons; the field is plural so referencing entities can be enumerated without paginating Comparisons).
@@ -434,7 +434,7 @@ Per-operation Tx/Rx convention:
 | **B (Area)** | One `tx_site` + `tx_equipment_ref` | One `rx_template` Equipment Profile applied at every grid sample at the template's `mount_height_m_agl` (or an `rx_altitude_override_m_agl` per-call) |
 | **C (Multi-link)** | One `tx_site` + `tx_equipment_refs[]` (defaults to the site's `default_equipment_refs[]`); each evaluated independently | `rx_templates[]`, each entry an Equipment Profile keyed by the radio's `link_type`. **Exactly one Rx template per distinct `link_type` present in the Tx set.** Each Tx is paired with the Rx template whose `link_type` matches; multiple Tx of the same `link_type` share one Rx template. Unmatched Tx fail validation with `OP_C_RX_TEMPLATE_MISSING`. |
 | **D (Multi-Tx)** | List of `tx_sites[]` with `equipment_ref` per site | One `rx_template` applied against all candidate Tx |
-| **E (3D)** | One (or more) `tx_site` + `tx_equipment_ref` | One `rx_template` applied at every (grid sample, altitude) drawn from the Operating Volume (or an inline `aoi + altitude_step_m`, where the Op E request supplies an AOI and a vertical step and the engine derives `altitude_min_m_agl` / `altitude_max_m_agl` from the Operating Volume reference; if neither operating_volume nor (aoi + altitude_step_m) is supplied, the request is rejected) |
+| **E (3D)** | One (or more) `tx_site` + `tx_equipment_ref` | One `rx_template` applied at every (grid sample, altitude) drawn from the Operating Volume (or an inline `aoi + altitude_step_m`, where the Op E request supplies an AOI and a vertical step and the engine derives `altitude_min_m` / `altitude_max_m` from the Operating Volume reference; if neither operating_volume nor (aoi + altitude_step_m) is supplied, the request is rejected) |
 
 Coordinates may be inlined in place of a Site reference (per §2.3 reference shape). Equipment Profiles may be inlined or referenced.
 
@@ -538,6 +538,8 @@ ModelInterface {
 ```
 
 **Lifecycle.** `init` runs once at API startup; plugins register themselves via Python entry points (`importlib.metadata`). `validate_inputs` runs during pipeline Stage 2 for every Run; `predict` runs during Stage 8. `teardown` runs at API shutdown. There is no hot reload in v1 — to add or upgrade a plugin, restart the API.
+
+**Loading order and ID collisions.** At startup the engine enumerates every entry-point-registered propagation-model plugin and orders them alphabetically by entry-point name. The deployment may override the order with the `RFANALYZER_PLUGIN_ORDER` environment variable (a comma-separated list of entry-point names; unlisted plugins follow alphabetically after listed ones). If two plugins register the same `propagation_model_id`, the API **fails to start** with a clear log line naming both plugins and the colliding ID — first-loaded does not silently win. The same rule applies to link-type plugins (§4.6) for `link_type` values.
 
 **Sandboxing.** Plugins run in-process. A misbehaving plugin can crash a worker; the orchestrator retries the affected Run on a different worker once before marking it `FAILED` with `MODEL_PLUGIN_CRASH`. Sandboxing for untrusted third-party plugins is deferred to a future ADR; v1 onboards only first-party-reviewed plugins.
 
@@ -719,7 +721,7 @@ LinkBudget {                        # the frozen contract emit() consumes
 }
 ```
 
-**Lifecycle.** Identical to the model plugin contract (§4.2). Plugins register via Python entry points; `init` and `teardown` are called at API process boundaries; no hot reload in v1. Plugin crash handling, sandbox model, and per-plugin major-version drift are governed by the same rules as model plugins (§4.2).
+**Lifecycle.** Identical to the model plugin contract (§4.2). Plugins register via Python entry points; `init` and `teardown` are called at API process boundaries; no hot reload in v1. Plugin crash handling, sandbox model, loading order (`RFANALYZER_PLUGIN_ORDER` override of alphabetical-by-entry-point default), and per-plugin major-version drift are governed by the same rules as model plugins (§4.2). When two link-type plugins register the same `link_type` value, the API fails to start.
 
 **Resolution.** When a Radio Profile carries `link_type: X`, the engine looks up the plugin registered for `X`. If none is registered, validation fails at Stage 2 with `LINK_TYPE_NOT_REGISTERED`. The `generic` link-type is special — it is implemented in core and always available; it falls back to the generic stage-10 path (received-power + fade-margin only, no specialized outputs).
 
@@ -838,7 +840,7 @@ The `max_possible` comparison is what surfaces "you could have gotten more from 
 ### 5.5 Coordinate systems & projections
 
 - **External API:** WGS84 lat/lon (EPSG:4326) **only** for inputs in v1. Altitudes in meters with explicit `altitude_reference` field (`agl` or `amsl`).
-- **Bbox & range ordering.** All bboxes must satisfy `south < north` and `west < east`; all freq ranges `min_mhz < max_mhz`; all altitude ranges `altitude_min_m_agl < altitude_max_m_agl`; all EIRP ranges `min_eirp_dbm < max_eirp_dbm`. Violations are rejected at Stage 2 with `BBOX_ORDERING_INVALID`.
+- **Bbox & range ordering.** All bboxes must satisfy `south < north` and `west < east`; all freq ranges `min_mhz < max_mhz`; all altitude ranges `altitude_min_m < altitude_max_m`; all EIRP ranges `min_eirp_dbm < max_eirp_dbm`. Violations are rejected at Stage 2 with `BBOX_ORDERING_INVALID`.
 - **Antimeridian.** v1 rejects `west > east` bboxes (which would imply a bbox crossing the antimeridian) with `BBOX_CROSSES_ANTIMERIDIAN_NOT_SUPPORTED`. Splitting AOIs at the antimeridian is an explicit non-goal of v1.
 - **Polar.** AOIs with `north > 85` or `south < −85` are processed in EPSG:3413 (north) / EPSG:3031 (south) and emit warning `POLAR_PROJECTION_DEGRADED`; results near the pole have larger uncertainty than the engine's nominal accuracy budget.
 - **Internal compute projection selection.** For non-polar AOIs the engine reprojects to LAEA centered on the AOI centroid: EPSG:3035 for AOI centroids in Europe (lat 35°–72°, lon −10°–40°), EPSG:9311 for North America (lat 15°–84°, lon −168°–−52°), and a computed-LAEA elsewhere. UTM is used for AOIs smaller than 50 km on a side that lie within a single zone. Reprojection is automatic; not exposed in the API.
@@ -989,7 +991,7 @@ A set of observations:
   notes,
   points: [
     {
-      lat, lon, alt_m_agl, alt_reference,
+      lat, lon, altitude_m, altitude_reference,
       freq_mhz,
       bandwidth_khz,
       observed_signal_dbm,
@@ -1012,7 +1014,7 @@ A measurement set may be a point cloud (camera traps that phoned home) or a trac
 ### 7.2 Ingest
 
 - `POST /v1/measurements` — create or full replace, with JSON body or multipart upload of CSV / GeoJSON. Request body up to 50 MB inline; larger sets upload via the asset model (§3.5) with `purpose: "measurement_csv"` and reference the asset by id.
-- `POST /v1/measurements/{id}:append` — chunked append for ongoing telemetry. Body is a JSON array of points or a CSV chunk. Each chunk requires an `Idempotency-Key` header to support retries on flaky uplinks. Append creates a new Measurement Set version (light copy-on-write); point-level dedup is by `(lat, lon, alt_m_agl, freq_mhz, timestamp)`.
+- `POST /v1/measurements/{id}:append` — chunked append for ongoing telemetry. Body is a JSON array of points or a CSV chunk. Each chunk requires an `Idempotency-Key` header to support retries on flaky uplinks. Append creates a new Measurement Set version (light copy-on-write); point-level dedup is by `(lat, lon, altitude_m, freq_mhz, timestamp)`.
 - Standard schemas accepted: documented CSV column convention, GeoJSON FeatureCollection with property mapping.
 - Required per-point fields: `lat`, `lon`, `freq_mhz`, `observed_signal_dbm`, `timestamp`. Other fields optional.
 
@@ -1071,6 +1073,9 @@ Multiple measurement sets attached to one Run produce multiple report blocks (no
 
 ## 8. Run Lifecycle, Retention & Non-Functional
 
+**Deployment configuration.** Every operator-tunable knob referenced anywhere in this section (timeouts, retention TTLs, sync budget, idempotency window, restricted-species polygons, redaction grid size, pin caps, storage quotas, plugin order, storage provider, bearer-key store parameters, webhook allowlist, logging redaction keys, and so on) lives in a single deployment-config document. The authoritative schema for that document is [`2026-04-25-deployment-config.schema.json`](./2026-04-25-deployment-config.schema.json) — when this section says *deployment-configurable*, that schema is where the field is defined. Adding a new operator knob requires extending the schema in the same commit as the spec change.
+
+
 ### 8.1 Run lifecycle
 
 ```mermaid
@@ -1123,6 +1128,18 @@ stateDiagram-v2
 Operators tune these per deployment based on hardware. The orchestrator also enforces a global ceiling of 24 hours regardless of per-op configuration.
 
 **Tile checkpointing for Op B/D/E.** For grid and voxel runs the engine partitions the AOI into tiles (default 256×256 px raster tiles for Op B/D; one altitude slab for Op E voxel) and persists each completed tile to the canonical artifact incrementally. The Run carries `completed_tile_count` and `total_tile_count`. A Run that hits EXPIRED can be resumed via `POST /v1/runs/{id}/resume`; the orchestrator transitions to RESUMING, replans only the un-completed tiles, then transitions to RUNNING and continues. Each resume increments `resume_count`. Op A is single-shot — it has no tile granularity and cannot be resumed; an EXPIRED Op A must be re-submitted as a new Run.
+
+**Worker leases and tile-write idempotence.** Workers acquire SUBMITTED runs via `SELECT … FOR UPDATE SKIP LOCKED` (per ADR-0001). The same transaction that locks the row writes a `worker_lease: {worker_id, lease_token, leased_at}` field onto the Run record; `lease_token` is a fresh UUID per acquisition. Lease TTL is the per-operation stage timeout × 1.5 (so the timeout fires before the lease expires under healthy operation). The worker periodically refreshes `leased_at` while RUNNING; missing the refresh window without writing a stage progress hint marks the lease stale.
+
+Tile writes are content-addressed by lease so that a stalled-but-not-dead worker cannot corrupt a fresh worker's output. Each tile's storage key is
+
+```
+runs/{run_id}/tiles/{stage}/{tile_x}-{tile_y}-{tile_z}-{lease_token[:8]}.bin
+```
+
+Two workers writing the same `(run_id, stage, tile_xyz)` under different leases produce different keys and never collide. The canonical-artifact assembler at Stage 11 picks tiles from the **latest-completed lease** (by `leased_at` ordering); orphan tiles from earlier leases are GC'd at Run termination.
+
+A sweeper job (running on the API process under `pg_advisory_lock`-based leader election) clears stale leases — leases whose `leased_at` falls outside the lease TTL window with no concurrent Run-row update — and resets the Run to SUBMITTED for re-pickup. Each sweeper-triggered reset increments `resume_count` and emits the warning `WORKER_LEASE_LOST` on the resumed Run so callers can see that a tile slice may have been redone. Tile keys from the lost lease remain on disk until canonical-artifact assembly so that any partial work is not discarded; the assembler still picks the latest-completed lease.
 
 Sync calls hold the HTTP response until COMPLETED/PARTIAL/FAILED, OR the response is auto-promoted to async at `sync_budget_seconds` (response returns `202`; the underlying Run continues running and reaches its terminal state normally). The Run record persists with the same status taxonomy regardless of how the HTTP response was shaped; the Run's `cancellation_reason` is `"sync_budget_exceeded"` only on the HTTP response, not on the Run itself (and the Run schema's `cancellation_reason` enum reflects this — it does not list `sync_budget_exceeded`).
 
@@ -1193,9 +1210,11 @@ flowchart LR
 
 ### 8.4 Auth & rate limiting
 
-API keys are deployment-managed (rotation, revocation, per-key labels). Pluggable identity per the auth adapter contract; v1 ships only the API-key adapter.
+API keys are deployment-managed (rotation, revocation, per-key labels). Pluggable identity per the auth adapter contract; v1 ships only the bearer-key adapter.
 
-**Auth adapter contract:**
+The v1 wire format, at-rest storage (argon2id with an 8-character prefix index), and the `tenant_api_keys` table shape are decided in [ADR-0002 §2](../../adr/0002-argus-alignment-and-auth.md). Bearer keys appear in the deployment-config redaction list (§8.6, ADR-0002 §3) so they never leak via structured logs. Submission of a `restricted_species` Run requires the caller key to carry the `opsec.read_restricted_species` scope (Appendix E.5).
+
+**Auth adapter contract** (the bearer-key adapter is the v1 default; see [ADR-0002 §2](../../adr/0002-argus-alignment-and-auth.md)):
 
 ```
 AuthAdapter.authenticate(request) -> Principal | AuthError
@@ -1432,6 +1451,7 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 | `MODEL_PLUGIN_MAJOR_DRIFT` | Replay was permitted across a propagation-model plugin's major version (`force_replay_across_major: true`); recorded per-plugin in `replay_plugin_major_drift[]`. |
 | `LINK_TYPE_PLUGIN_MAJOR_DRIFT` | Replay was permitted across a link-type plugin's major version. |
 | `RESUMED_FROM_CHECKPOINT` | Run was resumed via `POST /v1/runs/{id}/resume` from an EXPIRED state; emitted on the resumed Run. |
+| `WORKER_LEASE_LOST` | Sweeper detected a stale `worker_lease` and reset the Run to SUBMITTED for re-pickup; emitted on the resumed Run (§8.1). |
 | `GEOTIFF_STACK_FROM_GEOTIFFS` | Caller requested `geotiff_stack` on an Op E run that did not produce a `voxel` canonical; engine substituted a per-altitude `geotiff` collection. |
 | `SCENARIO_FALLBACK` | Auto-select couldn't map `(operation, link_type, geometry)` to a scenario via the §4.4 table; fell back to `terrestrial_p2p` / `terrestrial_area`. |
 

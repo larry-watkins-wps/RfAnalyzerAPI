@@ -53,12 +53,12 @@
 
     "LatLonAlt": {
       "type": "object",
-      "required": ["lat", "lon", "alt_m_agl"],
+      "required": ["lat", "lon", "altitude_m"],
       "properties": {
         "lat":           { "type": "number", "minimum": -90,  "maximum": 90 },
         "lon":           { "type": "number", "minimum": -180, "maximum": 180 },
-        "alt_m_agl":     { "type": "number" },
-        "alt_reference": { "$ref": "#/$defs/AltitudeReference", "default": "agl" }
+        "altitude_m":     { "type": "number" },
+        "altitude_reference": { "$ref": "#/$defs/AltitudeReference", "default": "agl" }
       },
       "additionalProperties": false
     },
@@ -103,8 +103,8 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^[a-z][a-z0-9_]*$",
-      "description": "Open string. `generic` is the only built-in core value; other values are registered by link-type plugins (spec §4.6). Bundled plugins ship `lora`, `lte`, `drone_c2`, `rtk`. Server returns LINK_TYPE_NOT_REGISTERED if the value is not registered.",
-      "examples": ["generic", "lora", "lte", "drone_c2", "rtk"]
+      "description": "Open string. `generic` is the only built-in core value; other values are registered by link-type plugins (spec §4.6). Bundled plugins ship `lora`, `lte`, `drone_c2`, `rtk`, `vhf_telemetry`. Server returns LINK_TYPE_NOT_REGISTERED if the value is not registered.",
+      "examples": ["generic", "lora", "lte", "drone_c2", "rtk", "vhf_telemetry"]
     },
     "FidelityTier":     { "type": "string", "enum": ["T0_FREE_SPACE", "T1_TERRAIN", "T2_TERRAIN_PLUS_CLUTTER", "T3_SURFACE", "T4_SURFACE_PLUS_BUILDINGS"] },
     "PropagationModel": { "type": "string", "enum": ["auto", "p1812", "p526", "itm", "p528", "p530", "friis", "two_ray"], "default": "auto" },
@@ -274,18 +274,41 @@
       "additionalProperties": false
     },
 
+    "AOILayer": {
+      "type": "object",
+      "description": "Per-layer provenance + asset reference (spec §3.2, §5.3).",
+      "properties": {
+        "source":           { "type": "string", "enum": ["bundled", "byo", "fetched"] },
+        "asset_ref":        { "$ref": "#/$defs/AssetId" },
+        "upstream_source":  { "type": "string" },
+        "upstream_version": { "type": "string" },
+        "acquired_at":      { "type": "string", "format": "date-time" },
+        "content_sha256":   { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "resolution_m":     { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+
     "InlineAOIPack": {
       "type": "object",
       "required": ["bbox"],
       "properties": {
-        "name":                  { "type": "string" },
-        "bbox":                  { "$ref": "#/$defs/Bbox" },
-        "dtm_asset_ref":         { "$ref": "#/$defs/AssetId" },
-        "dsm_asset_ref":         { "$ref": "#/$defs/AssetId" },
-        "clutter_asset_ref":     { "$ref": "#/$defs/AssetId" },
-        "buildings_asset_ref":   { "$ref": "#/$defs/AssetId" },
-        "clutter_table_ref":     { "$ref": "#/$defs/Reference" },
-        "resolution_m":          { "type": "number", "exclusiveMinimum": 0 }
+        "name":              { "type": "string" },
+        "bbox":              { "$ref": "#/$defs/Bbox" },
+        "layers": {
+          "type": "object",
+          "description": "Optional per-layer slots. Any subset may be present; absent layers fall through to the bundled global baseline (spec §5.2, §5.3).",
+          "properties": {
+            "dtm":       { "$ref": "#/$defs/AOILayer" },
+            "dsm":       { "$ref": "#/$defs/AOILayer" },
+            "clutter":   { "$ref": "#/$defs/AOILayer" },
+            "buildings": { "$ref": "#/$defs/AOILayer" }
+          },
+          "additionalProperties": false
+        },
+        "clutter_table_ref": { "$ref": "#/$defs/Reference" },
+        "resolution_m":      { "type": "number", "exclusiveMinimum": 0 },
+        "tags":              { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
     },
@@ -400,7 +423,7 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^[a-z][a-z0-9_]*$",
-      "description": "Output artifact key. Core keys are universal (any operation: `link_budget`, `path_profile`, `geotiff`, `geotiff_stack`, `voxel`, `geojson_contours`, `kmz`, `png_with_worldfile`, `rendered_cross_section`, `stats`, `best_server_raster`, `fidelity_tier_raster`, `point_query`). Per-link-type semantic keys are declared by link-type plugins (spec §4.6) — bundled plugins contribute LoRa: `lora_snr_margin`, `lora_best_sf`, `lora_link_metrics`; LTE: `lte_rsrp`, `lte_rsrq`, `lte_sinr`, `lte_mcs_feasibility`; drone_c2: `c2_pass_fail`, `c2_range_envelope`; rtk: `rtk_pass_fail`, `rtk_range_envelope`. Server validates against the union of core keys and currently-registered plugin outputs.",
+      "description": "Output artifact key. Core keys are universal (any operation: `link_budget`, `path_profile`, `geotiff`, `geotiff_stack`, `voxel`, `geojson_contours`, `kmz`, `png_with_worldfile`, `rendered_cross_section`, `stats`, `best_server_raster`, `fidelity_tier_raster`, `point_query`). Per-link-type semantic keys are declared by link-type plugins (spec §4.6) — bundled plugins contribute LoRa: `lora_snr_margin`, `lora_best_sf`, `lora_link_metrics`; LTE: `lte_rsrp`, `lte_rsrq`, `lte_sinr`, `lte_mcs_feasibility`; drone_c2: `c2_pass_fail`, `c2_range_envelope`; rtk: `rtk_pass_fail`, `rtk_range_envelope`; vhf_telemetry: `vhf_detection_probability`, `vhf_bearing_quality`, `vhf_range_envelope`. Server validates against the union of core keys and currently-registered plugin outputs.",
       "examples": [
         "link_budget", "path_profile", "geotiff", "geotiff_stack", "voxel",
         "geojson_contours", "kmz", "png_with_worldfile", "rendered_cross_section",
@@ -408,7 +431,8 @@
         "lora_snr_margin", "lora_best_sf", "lora_link_metrics",
         "lte_rsrp", "lte_rsrq", "lte_sinr", "lte_mcs_feasibility",
         "c2_pass_fail", "c2_range_envelope",
-        "rtk_pass_fail", "rtk_range_envelope"
+        "rtk_pass_fail", "rtk_range_envelope",
+        "vhf_detection_probability", "vhf_bearing_quality", "vhf_range_envelope"
       ]
     },
 
@@ -475,11 +499,7 @@
         "tx_equipment": { "$ref": "#/$defs/RefOrInlineEquipment" },
         "rx_site":      { "$ref": "#/$defs/RefOrInlineSite" },
         "rx_equipment": { "$ref": "#/$defs/RefOrInlineEquipment" },
-        "aoi":          { "$ref": "#/$defs/RefOrInlineAOI" },
-        "outputs": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": { "enum": ["link_budget", "path_profile", "rendered_cross_section", "point_query"] }
-        }
+        "aoi":          { "$ref": "#/$defs/RefOrInlineAOI" }
       }
     },
 
@@ -559,7 +579,7 @@
       "required": ["operation", "tx_sites", "rx_template", "outputs"],
       "oneOf": [
         { "required": ["operating_volume"] },
-        { "required": ["aoi", "alt_step_m"] }
+        { "required": ["aoi", "altitude_step_m"] }
       ],
       "properties": {
         "operation":   { "const": "voxel" },
@@ -571,7 +591,7 @@
         "operating_volume": { "$ref": "#/$defs/RefOrInlineOperatingVolume" },
         "aoi":              { "$ref": "#/$defs/RefOrInlineAOI" },
         "resolution_m":{ "type": "number", "exclusiveMinimum": 0 },
-        "alt_step_m":  { "type": "number", "exclusiveMinimum": 0 }
+        "altitude_step_m":  { "type": "number", "exclusiveMinimum": 0 }
       }
     }
   }

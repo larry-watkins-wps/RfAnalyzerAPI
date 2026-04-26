@@ -21,7 +21,7 @@
       { "site": { "ref": "dock-candidate-north-ridge" }, "equipment": { "ref": "drone-dock-c2-2_4ghz", "owner": "shared" } },
       { "site": { "ref": "dock-candidate-east-spur"   }, "equipment": { "ref": "drone-dock-c2-2_4ghz", "owner": "shared" } }
     ],
-    "rx_template": { "ref": "drone-c2-2_4ghz", "owner": "shared" },
+    "rx_template": { "ref": "drone-onboard-c2-2_4ghz", "owner": "shared" },
     "operating_volume": {
       "name": "patrol-envelope-2026q2",
       "polygon": {

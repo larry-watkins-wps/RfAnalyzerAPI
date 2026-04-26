@@ -212,10 +212,10 @@ sequenceDiagram
 | **Radio Profile** | `name`, `link_type` (string; `generic` is built-in, additional values registered by link-type plugins — see §4.6), `freq_mhz`, `bandwidth_khz`, `tx_power_dbm`, `rx_sensitivity_dbm` | Per-plugin extension fields. Bundled plugins ship `lora` (`spreading_factor`, `coding_rate`), `lte` (`band`, `earfcn`), `drone_c2` (`mode_label`), `rtk` (`mode_label`); each plugin's contract names the fields it consumes. Plus `modulation`, `fade_margin_db_target` (used by `generic`), `propagation_model_pref` (auto / explicit). | RF parameters; antenna-agnostic. |
 | **Antenna** | `name`, `kind` (`parametric` / `pattern_file`), `gain_dbi`, `polarization`, `applicable_bands: [{min_mhz, max_mhz}, …]` | `applicable_polarizations[]`. Parametric: `pattern_type` (omni / sector), `h_beamwidth_deg`, `v_beamwidth_deg`, `electrical_downtilt_deg`. File: `format` (msi/adf/ant/csv), `pattern_asset_ref`. | Antenna spec; orientation comes from Equipment. The engine warns (`MODEL_OUT_OF_NOMINAL_FREQ`) at use within ±10 % of the declared band edge and fails (`ANTENNA_OUT_OF_BAND`) at >25 %. |
 | **Equipment Profile** | `name`, `radio_ref`, `antenna_ref`, `mount_height_m_agl`, `cable_loss_db` | `cable_loss_curve: [{freq_mhz, loss_db}]` (overrides scalar via piecewise-linear interpolation), `azimuth_deg`, `mechanical_downtilt_deg`, `mfr`, `model`, `notes` | Deployable bundle of radio + antenna + mounting. `cable_loss_db` is evaluated at the bound radio's center frequency. |
-| **AOI Pack** | `name`, `bbox` (south, west, north, east) | `dtm_ref`, `dsm_ref`, `clutter_ref`, `buildings_ref`, `clutter_table_ref`, `source` (bundled / byo / fetched), per-layer `upstream_source`, `upstream_version`, `acquired_at`, `content_sha256`, `resolution_m`, `notes` | Region with attached geo-data layers. Per-layer provenance fields (§5.3). |
-| **ClutterTable** | `name`, `taxonomy_id`, `class_table` (mapping class_id → per-band attenuation in dB) | `depolarization_factor_per_class` (mapping class_id → `d ∈ [0, 1]`), `notes`, `applicable_freq_bands` | Per-class attenuation table; depolarization factor consumed by polarization mismatch (§4.5). |
+| **AOI Pack** | `name`, `bbox` (south, west, north, east) | `layers: { dtm: AOILayer, dsm: AOILayer, clutter: AOILayer, buildings: AOILayer }` (each `AOILayer` carries `source` ∈ `bundled/byo/fetched`, `asset_ref`, `upstream_source`, `upstream_version`, `acquired_at`, `content_sha256`, `resolution_m`); plus pack-level `clutter_table_ref`, `resolution_m`, `notes`, `tags[]` | Region with attached geo-data layers. Per-layer provenance fields (§5.3). |
+| **ClutterTable** | `name`, `taxonomy_id`, `class_table` (mapping class_id → `{label?, attenuation_db_per_band: {anchor_freq_mhz_str → dB per 100 m of path}, depolarization_factor: 0..1, notes?}`) | `applicable_freq_bands`, profile-level `notes` | Per-class attenuation table. Per-class `depolarization_factor` is consumed by polarization mismatch (§4.5). The engine accumulates attenuation linearly along path segments and interpolates linearly in dB between declared anchor frequencies; outside the anchor range it falls back to the nearest anchor. |
 | **Operating Volume** | `name`, `bbox` *or* `polygon`, `altitude_min_m_agl`, `altitude_max_m_agl` | `altitude_step_m`, `duration_estimate_min`, `home_site_ref`, `host_site_ref`, `notes` | A 3D region of interest for volumetric coverage analysis. Drone-flight-envelope is the primary use case (Op E with `home_site_ref` pointing at the drone dock or launch site); also covers tower vertical-pattern surveys, tethered-balloon links, and any other case needing per-altitude evaluation. `home_site_ref` names a return-to-home / launch-recovery anchor (drone-specific semantics). `host_site_ref` names the operational anchor for non-recovering deployments. Both are optional and orthogonal — typically the same Site, sometimes different, sometimes neither. |
-| **Measurement Set** | `name`, `points[]` where each `= {lat, lon, alt_m_agl, freq_mhz, observed_signal_dbm, observed_metric, timestamp, source}` | `ordered: bool` (default `false`; tracks set this `true`), per-point `seq: int` (when `ordered`), `device_ref`, `site_ref` *or* `aoi_ref`, `sensitivity_class` (Appendix E), `notes`, per-point `bandwidth_khz`, `uncertainty_db`, `tags` | Stored field RSSI/RSRP observations. A point cloud (camera traps) by default; tracks set `ordered: true` and supply `seq` per point. |
+| **Measurement Set** | `name`, `points[]` where each `= {lat, lon, altitude_m, altitude_reference, freq_mhz, observed_signal_dbm, observed_metric, timestamp, source}` | `ordered: bool` (default `false`; tracks set this `true`), per-point `seq: int` (when `ordered`), `device_ref`, `site_ref` *or* `aoi_ref`, `sensitivity_class` (Appendix E), `notes`, per-point `bandwidth_khz`, `uncertainty_db`, `tags` | Stored field RSSI/RSRP observations. A point cloud (camera traps) by default; tracks set `ordered: true` and supply `seq` per point. |
 | **Comparison / Plan** | `name`, `run_ids[]` | `notes`, `winner_run_id`, `decision_rationale`, `decided_at` | Captures a real placement decision with the runs that informed it. |
 | **Regulatory Profile** | `name`, `country_code` (ISO-3166-1 alpha-2), `regulator`, `bands[]` (each `min_mhz`, `max_mhz`, `max_eirp_dbm`, `license_class ∈ {license_exempt, license_required, permit_required, prohibited}`) | per-band `link_type_hint`, `duty_cycle_pct_max`, `bandwidth_khz_max`, `notes`; profile-level `effective_date`, `superseded_at`, `regulator_url`, `reference_doc_asset_ref`, `notes` | Per-jurisdiction band/EIRP/license-class constraints. Referenced from analysis requests via `regulatory_profile_ref`; the engine validates each Tx's effective EIRP and frequency against the matching band at Stage 2 (§4.1) and emits `REGULATORY_*` codes per the request's `enforce_regulatory` flag (§3.7, Appendix D). **Advisory only — does not constitute licensing advice (§1 out of scope).** |
 
@@ -223,19 +223,21 @@ sequenceDiagram
 
 A Run is a first-class persisted record but not a catalog entity (no name-based identity, no sharing). Fields:
 
-- `id`, `submitted_by_key`, `submitted_at`, `inputs_resolved_at`, `completed_at`, `status`
+- `id`, `submitted_by_key`, `submitted_at`, `inputs_resolved_at`, `completed_at`, `status` (one of `SUBMITTED` / `QUEUED` / `RUNNING` / `RESUMING` / `COMPLETED` / `PARTIAL` / `FAILED` / `CANCELLED` / `EXPIRED`; `RESUMING` is the transient state during checkpoint resume, §8.1)
 - `operation` (`p2p` / `area` / `multi_link` / `multi_tx` / `voxel`)
 - `mode_requested` (`sync` / `async` / `auto`), `mode_executed` (`sync` / `async`)
 - `inputs_resolved` — frozen, fully-inlined snapshot of every reference at the freeze point
-- `inputs_resolved_sha256` — SHA-256 of the canonicalized `inputs_resolved` (used by opt-in dedup, §8.2)
-- `engine_version`, `engine_major`, `models_used[]` (with model plugin versions), `data_layer_versions`
+- `inputs_resolved_sha256` — SHA-256 of the **canonicalized** `inputs_resolved`, used by opt-in dedup (§8.2) and by replay/idempotency comparisons. Canonicalization rule: **RFC 8785 (JSON Canonicalization Scheme — JCS)**. Specifically: UTF-8 encoding, NFC string normalization, lexicographic key ordering, no insignificant whitespace, JSON Number serialization per JCS §3.2.2.3 (which forces a canonical double-to-string form for all floats — operators that round-trip floats through alternative serializers will produce a different hash). A golden vector for the canonicalization rule lives at [`seed/test-vectors/canonicalization-vector.json`](seed/test-vectors/canonicalization-vector.json).
+- `engine_version`, `engine_major`, `models_used[]` (with model plugin versions and `plugin_major` per entry), `data_layer_versions`
 - `fidelity_tier_dominant`, `fidelity_tier_min`, `fidelity_tier_max`, `fidelity_tier_max_possible`
 - `output_artifact_refs[]` — see §8.9 for shape
 - `warnings[]`, `error` (if failed) — codes per Appendix D
 - `pinned` (boolean; suppresses canonical-artifact TTL expiry)
-- `cancellation_reason` (`user` | `expired` | `sync_budget_exceeded` | null)
-- `comparison_id` (if part of one)
-- `replay_of_run_id` (if produced via the replay endpoint), `replay_engine_major_drift` (if cross-major)
+- `cancellation_reason` (`user` | `expired` | null) — `sync_budget_exceeded` is intentionally **not** a Run cancellation reason; it appears only on the HTTP response when a sync request is auto-promoted to async, while the underlying Run continues normally to its own terminal state (§8.1).
+- `comparison_ids[]` — every Comparison referencing this Run (a Run may be cited by multiple Comparisons; the field is plural so referencing entities can be enumerated without paginating Comparisons).
+- `resume_count` (integer ≥ 0) — number of times this Run has been resumed via `POST /v1/runs/{id}/resume` after EXPIRED (§8.1).
+- `completed_tile_count`, `total_tile_count` — per-tile checkpoint progress for Op B/D/E. `total_tile_count` is null until tile planning completes at Stage 3.
+- `replay_of_run_id` (if produced via the replay endpoint), `replay_engine_major_drift` (if cross-engine-major), `replay_plugin_major_drift[]` (per-plugin major drift, when replaying across plugin majors).
 - `sensitivity_class` (Appendix E) — `public` | `org_internal` | `location_redacted` | `restricted_species`. Defaults to the deployment's configured default class (typically `org_internal`). May be auto-promoted; see Appendix E.
 - `regulatory_profile_ref_resolved` — convenience pointer into `inputs_resolved` if a regulatory profile was supplied; null otherwise.
 
@@ -268,7 +270,7 @@ Bundled categories with concrete entries (the list expands as plugins land; this
   - **New v1 seeds:** `camera-trap-lte-catm1-rx` (cellular trail-cam variant), `meshtastic-node-915-tx`, `acoustic-sensor-lora-rx` (low-rate audio classifiers).
 
 - **Equipment Profiles — wildlife telemetry** (new category, built on a `vhf_telemetry` Radio Profile + endpoint antenna):
-  - `wildlife-collar-vhf-large` — large-mammal collar (rhino, elephant, lion), ~1 W EIRP, integrated whip.
+  - `wildlife-collar-vhf-large` — large-mammal collar (rhino, elephant, lion), ~10 mW EIRP class, integrated whip. (Real-world VHF wildlife collars are sub-100 mW for battery life and regulatory reasons.)
   - `wildlife-collar-vhf-small` — bird/small-mammal tag, ~10 mW EIRP, loop antenna.
   - `vhf-yagi-handheld-3el` — ranger / researcher Rx pairing the 3-element Yagi with a generic VHF receiver.
 
@@ -355,7 +357,9 @@ sequenceDiagram
 
 If `complete` is not called within 24 h of `initiate`, the upload is aborted and any uploaded parts are reclaimed.
 
-**Reference & lifecycle.** Catalog entity fields named `*_asset_ref` carry an `asset_id`. An asset with no inbound references from any catalog entity (including soft-deleted ones) is purged after `asset_orphan_ttl_days` (default **7**). Inbound references from any live or soft-deleted catalog entity keep an asset alive; only hard-purge of the entity removes the reference.
+**Reference & lifecycle.** Catalog entity fields named `*_asset_ref` carry an `asset_id`. An asset with no inbound references from any catalog entity (including soft-deleted ones) **and from no in-flight Run** is purged after `asset_orphan_ttl_days` (default **7**). Asset reference counts incorporate Runs from the moment the Run reaches `SUBMITTED` (the freeze point, §3.1) — the asset's refcount cannot drop to zero while any Run that references it is still in `SUBMITTED` / `QUEUED` / `RUNNING` / `RESUMING`. The orphan-TTL clock starts only after the refcount hits zero. This closes the GC race where an asset could be deleted under an in-flight Run that holds a reference in its `inputs_resolved` snapshot. Inbound references from any live or soft-deleted catalog entity also keep an asset alive; only hard-purge of the entity removes that reference.
+
+**Multipart part-URL refresh.** The presigned PUT URLs returned by `:initiate` for a multipart upload have per-part `expires_at` timestamps. If an upload spans more time than the original part expiry, the caller can `POST /v1/assets/{asset_id}:refresh_part_urls` to obtain fresh PUT URLs for any not-yet-completed parts. Already-completed parts are not reissued. The session itself is reclaimed after 24 h with no `:complete` regardless of part refreshes.
 
 **Local-mode parity.** In offline/Docker-Compose deployments, `upload_url` and `download_url` point back at the API service, which streams to/from a host-mounted volume. The client flow is identical.
 
@@ -373,7 +377,7 @@ erDiagram
 
     Antenna            }o--o| Asset            : "pattern_asset_ref"
 
-    AOIPack            }o--o{ Asset            : "dtm/dsm/clutter/buildings refs"
+    AOIPack            }o--o{ Asset            : "layers.{dtm,dsm,clutter,buildings}.asset_ref"
     AOIPack            }o--o| ClutterTable     : "clutter_table_ref"
 
     OperatingVolume    }o--o| Site             : "home_site_ref"
@@ -430,7 +434,7 @@ Per-operation Tx/Rx convention:
 | **B (Area)** | One `tx_site` + `tx_equipment_ref` | One `rx_template` Equipment Profile applied at every grid sample at the template's `mount_height_m_agl` (or an `rx_altitude_override_m_agl` per-call) |
 | **C (Multi-link)** | One `tx_site` + `tx_equipment_refs[]` (defaults to the site's `default_equipment_refs[]`); each evaluated independently | `rx_templates[]`, each entry an Equipment Profile keyed by the radio's `link_type`. **Exactly one Rx template per distinct `link_type` present in the Tx set.** Each Tx is paired with the Rx template whose `link_type` matches; multiple Tx of the same `link_type` share one Rx template. Unmatched Tx fail validation with `OP_C_RX_TEMPLATE_MISSING`. |
 | **D (Multi-Tx)** | List of `tx_sites[]` with `equipment_ref` per site | One `rx_template` applied against all candidate Tx |
-| **E (3D)** | One (or more) `tx_site` + `tx_equipment_ref` | One `rx_template` applied at every (grid sample, altitude) drawn from the Operating Volume (or an inline `bbox + altitudes[]`) |
+| **E (3D)** | One (or more) `tx_site` + `tx_equipment_ref` | One `rx_template` applied at every (grid sample, altitude) drawn from the Operating Volume (or an inline `aoi + altitude_step_m`, where the Op E request supplies an AOI and a vertical step and the engine derives `altitude_min_m_agl` / `altitude_max_m_agl` from the Operating Volume reference; if neither operating_volume nor (aoi + altitude_step_m) is supplied, the request is rejected) |
 
 Coordinates may be inlined in place of a Site reference (per §2.3 reference shape). Equipment Profiles may be inlined or referenced.
 
@@ -448,7 +452,7 @@ Every analysis flows through a subset of these stages, in order:
    - **Op E (3D / volumetric):** 1 (or M) Tx × N Rx × L altitudes. Output shape is caller-selectable: stack of 2D rasters per altitude and/or a 3D voxel array.
 4. **Load geo data.** Geo Data Service returns the merged tile stack covering the geometry: DTM (always — falls back to bundled baseline), DSM (if available), clutter raster (if available), building polygons (if available). Engine records which layers were resolved and the per-pixel fidelity tier.
 5. **Build terrain profiles.** For each (Tx, Rx) sample pair, sample elevation along the great-circle path. If DSM present, that's the obstacle profile; if only DTM, terrain-only.
-6. **Apply clutter overlay.** If clutter raster + ClutterTable present, accumulate per-pixel attenuation along the path based on land-cover class table.
+6. **Apply clutter overlay and building loss.** If clutter raster + ClutterTable present, accumulate per-pixel attenuation along the path based on the land-cover class table; per-class attenuation values are dB-per-100-m and are interpolated linearly in dB between declared anchor frequencies. If buildings vector present, additionally compute per-building penetration / wall loss along intersected segments.
 7. **Apply antenna gains.** Look up Tx and Rx gain at the bearing+elevation of the path. Compute polarization mismatch loss per §4.5.
 8. **Run propagation model.** The selected model plugin computes path loss given the profile, frequency, geometry, and any model-specific parameters.
 9. **Aggregate link budget.** Total received power = Tx power + Tx gain − cable loss − path loss − clutter loss − polarization mismatch − Rx feeder loss + Rx gain. Compute fade margin vs. Rx sensitivity and link availability % from a fading model. Fading model selection: `auto` by default — Rayleigh in dense clutter / non-line-of-sight, Rician (with K-factor varying by clearance) in line-of-sight, log-normal shadowing applied per environment class. Caller can pin `fading_model` and `fading_params` per call; chosen model is recorded in the link budget.
@@ -465,7 +469,7 @@ flowchart TD
     S3[3. Plan geometry samples<br/>op-specific Tx/Rx pairing]
     S4[4. Load geo data<br/>DTM / DSM / clutter / buildings]
     S5[5. Build terrain profiles<br/>great-circle elevation samples]
-    S6[6. Apply clutter overlay<br/>per-class path attenuation]
+    S6[6. Apply clutter overlay and building loss<br/>per-class path attenuation + per-building loss]
     S7[7. Apply antenna gains<br/>+ polarization mismatch §4.5]
     S8[8. Run propagation model<br/>plugin: P.1812 / ITM / P.528 / ...]
     S9[9. Aggregate link budget<br/>received power, fade margin, availability]
@@ -495,25 +499,49 @@ Every propagation model is a plugin implementing:
 ```
 ModelCapabilities {
   name: str                            # e.g., "ITU-R P.1812"
-  version: str
+  version: str                         # plugin semver
+  plugin_major: int                    # extracted from version; replay compares this
+  compatible_engine_majors: [int]      # the engine majors this plugin supports
   freq_range_mhz: (min, max)
-  scenario_suitability: {
+  scenario_suitability: {              # closed enum (§4.4)
      terrestrial_p2p: float,           # 0..1 score, 0 = not suitable
      terrestrial_area: float,
      air_to_ground: float,
      low_altitude_short_range: float,
      ionospheric: float,
-     urban: float
+     urban: float,
+     indoor_outdoor: float
   }
   required_data_tiers: {min, preferred}  # e.g., min=DTM, preferred=DTM+clutter
   parameters_schema: JSONSchema           # model-specific knobs
 }
 
+PathLossResult {
+  pathloss_db: float                   # total path loss
+  components: {                        # nullable; populated when the model can decompose
+    freespace_db, terrain_db, clutter_db,
+    building_db, atmospheric_db, rain_db
+  } | null
+  fade_margin_db: float | null         # statistical fade margin (e.g., from P.530)
+  fidelity_tier_used: enum T0..T4      # the tier the model actually consumed
+  model_warnings: [Warning]            # codes from Appendix D warnings
+  model_diagnostics: object | null     # opaque, model-specific; surfaces only in the Run trace
+}
+
 ModelInterface {
+  init(config: object) -> None         # called once at API startup
   capabilities() -> ModelCapabilities
+  validate_inputs(profile, frequency, geometry, params, data_tier) -> [Warning|Error]
   predict(profile, frequency, geometry, params, data_tier) -> PathLossResult
+  teardown() -> None                    # called at API shutdown
 }
 ```
+
+**Lifecycle.** `init` runs once at API startup; plugins register themselves via Python entry points (`importlib.metadata`). `validate_inputs` runs during pipeline Stage 2 for every Run; `predict` runs during Stage 8. `teardown` runs at API shutdown. There is no hot reload in v1 — to add or upgrade a plugin, restart the API.
+
+**Sandboxing.** Plugins run in-process. A misbehaving plugin can crash a worker; the orchestrator retries the affected Run on a different worker once before marking it `FAILED` with `MODEL_PLUGIN_CRASH`. Sandboxing for untrusted third-party plugins is deferred to a future ADR; v1 onboards only first-party-reviewed plugins.
+
+**Versioning & replay.** A plugin's `version` and `plugin_major` flow through `Run.models_used[]`. On replay, per-plugin major drift between the original Run and the current registered plugin set is detected; cross-major replay requires `force_replay_across_major: true`. Drift emits the warning `MODEL_PLUGIN_MAJOR_DRIFT` (or, for link-type plugins, `LINK_TYPE_PLUGIN_MAJOR_DRIFT`) on the resulting Run with an explicit `replay_plugin_major_drift[]` entry.
 
 ### 4.3 Models supported
 
@@ -534,10 +562,25 @@ Per-class clutter overlay is applied as a separate pipeline stage (stage 6) on t
 When `propagation_model = auto` (the default), the engine picks per-call by:
 
 1. Filter plugins whose `freq_range_mhz` covers the radio's frequency.
-2. Score remaining plugins by `scenario_suitability[scenario]` where `scenario` is derived from `(operation, link_type, geometry)` — e.g., Op E with drone C2 → `air_to_ground`; Op B with LoRa from a tower → `terrestrial_area`.
-3. Down-weight plugins whose `required_data_tiers.min` exceeds what the AOI provides.
-4. Pick the highest-scoring plugin; tie-break by an explicit preference order configured per deployment.
-5. The picked model is recorded in `Run.models_used` and surfaced in the response.
+2. Map `(operation, link_type, geometry)` to a single scenario via the table below.
+3. Score remaining plugins by `scenario_suitability[scenario]`.
+4. Down-weight plugins whose `required_data_tiers.min` exceeds what the AOI provides.
+5. Pick the highest-scoring plugin; tie-break by an explicit preference order configured per deployment.
+6. The picked model is recorded in `Run.models_used` and surfaced in the response.
+
+**Scenario table (frozen).** Adding a new scenario requires a spec amendment. Adding a new (operation, link_type) combination outside this table falls back to `terrestrial_p2p` for Op A and `terrestrial_area` for Ops B/C/D, with warning `SCENARIO_FALLBACK`.
+
+| Operation | link_type | Geometry | Scenario |
+|---|---|---|---|
+| A (P2P) | any | terrestrial Tx and Rx | `terrestrial_p2p` |
+| A (P2P) | `drone_c2` | airborne Rx (Rx in operating volume above ground) | `air_to_ground` |
+| B (Area) | `lora`, `lte`, `vhf_telemetry`, `generic` | terrestrial grid | `terrestrial_area` |
+| B (Area) | `drone_c2`, `rtk` | terrestrial grid (low-altitude link) | `low_altitude_short_range` |
+| C (Multi-link) | per Tx, see B rules | terrestrial grid | per-Tx scenario from B |
+| D (Multi-Tx) | as B | terrestrial grid | as B |
+| E (Voxel) | `drone_c2`, `rtk` | airborne grid | `air_to_ground` |
+| E (Voxel) | other | airborne grid | `low_altitude_short_range` |
+| any | any | dense urban geometry (>30 % `built-up` clutter on the path) | `urban` (overrides above) |
 
 A caller can pin a specific model (`propagation_model = "p1812"`) to override auto-select. If the pinned model is unsuitable (out of frequency range, missing required data tier), the request fails with `PINNED_MODEL_OUT_OF_RANGE` or `PINNED_MODEL_DATA_TIER_INSUFFICIENT`.
 
@@ -581,6 +624,8 @@ After Tx/Rx antenna gains are applied, the engine computes mismatch loss in two 
 | **LHCP** | 3 | 3 | 20 | 0 | 3 | 0 |
 | **slant-45** | 3 | 3 | 3 | 3 | 0 if aligned, 20 if orthogonal | 0 |
 | **dual** | 0 | 0 | 0 | 0 | 0 | 3 |
+
+The slant-45-vs-slant-45 cell is determined by the antennas' `slant_polarization_orientation_deg` (0 = +45°, 90 = −45°). Aligned (both 0 or both 90) → 0 dB; orthogonal (0 vs 90 or 90 vs 0) → 20 dB. If either antenna's `slant_polarization_orientation_deg` is null/unspecified, the engine treats the pair as worst-case 20 dB and emits warning `POLARIZATION_DEFAULTED`.
 
 **Step 2 — depolarization attenuation along the path.** Heavy clutter (canopy, multipath) depolarizes the signal, reducing effective cross-pol mismatch. Each `ClutterTable` row carries `depolarization_factor d_i ∈ [0, 1]` (default 0). The path-aggregated factor is
 
@@ -636,15 +681,45 @@ LinkTypePluginCapabilities {
 }
 
 LinkTypePluginInterface {
+  init(config: object) -> None
   capabilities() -> LinkTypePluginCapabilities
-
-  # Stage 10: type-specific computation given the aggregated link budget
-  emit(link_budget, outputs_requested, params) -> { artifacts, warnings }
 
   # Pre-flight validation hook (called during Stage 2)
   validate(radio_profile, equipment_profile, geometry) -> [warnings, errors]
+
+  # Stage 10: type-specific computation given the aggregated link budget
+  emit(link_budget: LinkBudget, outputs_requested, params) -> { artifacts, warnings }
+
+  teardown() -> None
+}
+
+LinkBudget {                        # the frozen contract emit() consumes
+  frequency_mhz: float
+  bandwidth_khz: float
+  tx_power_dbm: float
+  tx_antenna_gain_dbi: float
+  tx_cable_loss_db: float
+  tx_eirp_dbm: float                # convenience: tx_power + gain - cable
+  rx_antenna_gain_dbi: float
+  rx_cable_loss_db: float
+  rx_sensitivity_dbm: float
+  total_pathloss_db: float
+  pathloss_components: PathLossResult.components | null
+  polarization_mismatch: {
+     base_db: float, depolarization_d: float, effective_db: float
+  }
+  fade_margin_db: float | null
+  link_margin_db: float             # received_power - sensitivity
+  fidelity_tier_used: enum T0..T4
+  tx_radio_profile_resolved: object # snapshot from inputs_resolved
+  rx_radio_profile_resolved: object
+  tx_antenna_resolved: object
+  rx_antenna_resolved: object
+  geometry: object                  # great-circle path length, bearing, elevations
 }
 ```
+
+**Lifecycle.** Identical to the model plugin contract (§4.2). Plugins register via Python entry points; `init` and `teardown` are called at API process boundaries; no hot reload in v1. Plugin crash handling, sandbox model, and per-plugin major-version drift are governed by the same rules as model plugins (§4.2).
 
 **Resolution.** When a Radio Profile carries `link_type: X`, the engine looks up the plugin registered for `X`. If none is registered, validation fails at Stage 2 with `LINK_TYPE_NOT_REGISTERED`. The `generic` link-type is special — it is implemented in core and always available; it falls back to the generic stage-10 path (received-power + fade-margin only, no specialized outputs).
 
@@ -665,7 +740,7 @@ LinkTypePluginInterface {
 | **DTM** (bare-earth elevation) | Single-band raster (Float32, meters AMSL) | SRTM-30, Copernicus GLO-30, BYO | Stages 5, 8 (always required) |
 | **DSM** (surface incl. canopy/buildings) | Single-band raster (Float32, meters AMSL) | Copernicus GLO-30 DSM, drone-derived photogrammetry, BYO | Stage 5 if present |
 | **Clutter / Land-cover** | Categorical raster (UInt8/UInt16) + ClutterTable mapping class → attenuation per band | ESA WorldCover, Copernicus CGLS, BYO | Stages 6, 7 (depolarization) if present |
-| **Buildings** | Vector (GeoJSON / GeoPackage / Shapefile) with `height_m` attribute | OSM, BYO | Stage 6 building loss; stage 5 obstacle profile if no DSM |
+| **Buildings** | Vector (GeoJSON / GeoPackage / Shapefile) with `height_m` attribute | OSM, BYO | Stage 6 (clutter + building loss); stage 5 obstacle profile if no DSM |
 
 ### 5.2 Bundled global baseline
 
@@ -762,13 +837,17 @@ The `max_possible` comparison is what surfaces "you could have gotten more from 
 
 ### 5.5 Coordinate systems & projections
 
-- **External API:** WGS84 lat/lon (EPSG:4326). Altitudes in meters with explicit `altitude_reference` field (`agl` or `amsl`).
-- **Internal compute:** engine reprojects to a local equal-area or equidistant projection appropriate for the AOI (UTM zone for small AOIs, Lambert Azimuthal Equal-Area for large). Reprojection is automatic; not exposed in the API.
+- **External API:** WGS84 lat/lon (EPSG:4326) **only** for inputs in v1. Altitudes in meters with explicit `altitude_reference` field (`agl` or `amsl`).
+- **Bbox & range ordering.** All bboxes must satisfy `south < north` and `west < east`; all freq ranges `min_mhz < max_mhz`; all altitude ranges `altitude_min_m_agl < altitude_max_m_agl`; all EIRP ranges `min_eirp_dbm < max_eirp_dbm`. Violations are rejected at Stage 2 with `BBOX_ORDERING_INVALID`.
+- **Antimeridian.** v1 rejects `west > east` bboxes (which would imply a bbox crossing the antimeridian) with `BBOX_CROSSES_ANTIMERIDIAN_NOT_SUPPORTED`. Splitting AOIs at the antimeridian is an explicit non-goal of v1.
+- **Polar.** AOIs with `north > 85` or `south < −85` are processed in EPSG:3413 (north) / EPSG:3031 (south) and emit warning `POLAR_PROJECTION_DEGRADED`; results near the pole have larger uncertainty than the engine's nominal accuracy budget.
+- **Internal compute projection selection.** For non-polar AOIs the engine reprojects to LAEA centered on the AOI centroid: EPSG:3035 for AOI centroids in Europe (lat 35°–72°, lon −10°–40°), EPSG:9311 for North America (lat 15°–84°, lon −168°–−52°), and a computed-LAEA elsewhere. UTM is used for AOIs smaller than 50 km on a side that lie within a single zone. Reprojection is automatic; not exposed in the API.
 - **Output rasters:** WGS84 by default; caller may request an alternate output CRS for direct GIS handoff.
 - **Resolution:** caller specifies output raster resolution explicitly in meters; engine warns (`RESOLUTION_EXCEEDS_DATA`) if requested resolution exceeds the underlying data resolution.
 
 ### 5.6 BYO data validation
 
+- **Datum.** WGS84 (EPSG:4326) only. Uploaded rasters in any other CRS are rejected at AOI Pack create with `UNSUPPORTED_CRS` (the operator must reproject locally before uploading).
 - **Raster:** CRS readable, extent within declared bbox, datatype matches expected (Float32 for elevation, integer for clutter), no all-NoData. Resolution is declared.
 - **Buildings vector:** valid geometry, has `height_m` attribute (or a configurable mapping), within declared bbox.
 - **Clutter:** class values present in a supplied ClutterTable, or use of a known taxonomy.
@@ -793,9 +872,9 @@ Artifacts are classified as **canonical** (stored to the per-class TTL) or **der
 | Artifact key | Class | Format | Content | Applicable ops |
 |---|---|---|---|---|
 | `link_budget` | canonical (JSON) | JSON | Full per-link breakdown: Tx power, Tx gain, cable loss, polarization mismatch (base, d, effective), free-space loss, terrain diffraction loss, clutter loss, building loss, total path loss, Rx gain, Rx feeder loss, received power, fade margin, link availability %, link result (pass/fail). **For Op A and per-link in Op C:** one object per Tx-Rx pair. **For Op B, D, E:** one Tx-side summary per Tx — component breakdown at the grid centroid; received power, fade margin, and availability reported as median / p5 / p95 across the grid (per-pixel detail lives in `geotiff` and `stats`). | A, B, C, D, E |
-| `path_profile` | canonical (JSON) | JSON or GeoJSON LineString | Sampled great-circle path with terrain/surface elevation, clutter class along the path, Fresnel zone radii, line-of-sight obstruction points. | A; available on request for others |
+| `path_profile` | canonical for Op A; derivative for Ops B/C/D/E (rebuilt on demand from the `geotiff`/`voxel` canonicals at the requested points) | JSON or GeoJSON LineString | Sampled great-circle path with terrain/surface elevation, clutter class along the path, Fresnel zone radii, line-of-sight obstruction points. | A always; B/C/D/E on request |
 | `geotiff` | canonical | GeoTIFF (LZW + predictor=3 by default; tiled, BIGTIFF when needed) | Single-band georeferenced raster of received signal (dBm) or path loss (dB). CRS configurable, default WGS84. | B, C, D, E (per altitude) |
-| `geotiff_stack` | derivative (from `voxel`, OR canonical when `voxel` not produced) | Multi-file or multi-band GeoTIFF | One raster per altitude slice for 3D operations. | E |
+| `geotiff_stack` | derivative (from `voxel`) | Multi-file or multi-band GeoTIFF | One raster per altitude slice for 3D operations. When a Run does not produce a `voxel` canonical, requesting `geotiff_stack` produces a `geotiff` per altitude instead and emits warning `GEOTIFF_STACK_FROM_GEOTIFFS`. | E |
 | `voxel` | canonical | NetCDF (CF-conventions) with zlib level 4 + chunking; **0.5 dB quantization to UInt16 by default**, `voxel_lossless: true` keeps Float32 | Dense 3D array (lat × lon × altitude) of received signal/path loss. | E |
 | `geojson_contours` | derivative (from `geotiff`) | GeoJSON FeatureCollection | Vector isolines at caller-specified thresholds. | B, C, D, E (per altitude) |
 | `kmz` | derivative (from `geotiff`) | KMZ | KML overlay wrapping the raster (color-mapped) and contour lines for direct Google Earth viewing. | B, C, D, E |
@@ -863,8 +942,8 @@ For Op E runs that produced a `voxel` canonical, the slice endpoint extracts sub
 GET /v1/runs/{id}/artifacts/voxel/slice
   ?bbox=south,west,north,east     # optional, default = full voxel bbox
   &altitudes=60,90,120            # discrete altitudes (m AGL), comma-separated
-  &alt_min=60&alt_max=120         # OR a range (m AGL)
-  &alt_step=10                    # used with range; defaults to voxel's stored step
+  &altitude_min=60&altitude_max=120  # OR a range (m AGL)
+  &altitude_step=10                  # used with range; defaults to voxel's stored step
   &format=geotiff|geotiff_stack|voxel_subset|json_point_grid
   &color_map=…                    # only for geotiff/png-style formats
 
@@ -1011,6 +1090,9 @@ stateDiagram-v2
     QUEUED --> EXPIRED: timeout
     RUNNING --> EXPIRED: timeout
 
+    EXPIRED --> RESUMING: caller :resume
+    RESUMING --> RUNNING: tiles replanned
+
     COMPLETED --> [*]
     PARTIAL --> [*]
     FAILED --> [*]
@@ -1021,13 +1103,28 @@ stateDiagram-v2
 - **SUBMITTED** — orchestrator validated and persisted Run record with frozen `inputs_resolved` (timestamp recorded as `inputs_resolved_at`).
 - **QUEUED** — awaiting a worker.
 - **RUNNING** — a worker has claimed it; progress hints (stage name + percent) flow to the status endpoint.
+- **RESUMING** — transient state entered when `POST /v1/runs/{id}/resume` is called against an EXPIRED Run. The orchestrator replans tiles starting at `completed_tile_count`, then transitions back to RUNNING. `resume_count` is incremented.
 - **COMPLETED** — all artifacts produced at the AOI's maximum possible fidelity.
 - **PARTIAL** — artifacts produced, but at degraded fidelity (`fidelity_tier_dominant < fidelity_tier_max_possible`), with a defaulted polarization, with `FETCHED_LAYER_PARTIAL`, etc. Includes structured `warnings[]`. Treated as success for client purposes.
 - **FAILED** — unrecoverable error. Includes structured `error` (Appendix D).
-- **CANCELLED** — caller called `DELETE /v1/runs/{id}`. Worker cooperatively interrupts. Cancellation latency is bounded: workers check for cancellation between stages and at sub-stage checkpoints inside stages 4 (per AOI tile loaded) and 8 (per propagation batch evaluated). Worst-case cancellation latency is `cancellation_check_seconds` (default **5**). `cancellation_reason: "user"`.
-- **EXPIRED** — exceeded a per-operation timeout configurable per deployment. `cancellation_reason: "expired"`.
+- **CANCELLED** — caller called `DELETE /v1/runs/{id}`. Worker cooperatively interrupts. Cancellation latency is bounded: workers check for cancellation between stages and at sub-stage checkpoints inside stages 4 (per AOI tile loaded) and 8 (per propagation batch evaluated). Worst-case cancellation latency is `cancellation_check_seconds` (default **5**), with a hard ceiling of **60 seconds** for any in-flight stage regardless of configuration; stages that cannot yield within 60 s must be split. `cancellation_reason: "user"`.
+- **EXPIRED** — exceeded a per-operation timeout. `cancellation_reason: "expired"`.
 
-Sync calls hold the HTTP response until COMPLETED/PARTIAL/FAILED, OR the response is auto-promoted to async at `sync_budget_seconds` (response returns `202`; the underlying Run continues running and reaches its terminal state normally). The Run record persists with the same status taxonomy regardless of how the HTTP response was shaped; the Run's `cancellation_reason` is `"sync_budget_exceeded"` only on the HTTP response, not on the Run itself.
+**Per-operation timeouts (deployment-configurable defaults):**
+
+| Op | Default timeout |
+|---|---|
+| A — point-to-point | 60 seconds |
+| B — area | 30 minutes |
+| C — multi-link | 30 minutes |
+| D — multi-Tx best-server | 60 minutes |
+| E — voxel | 4 hours |
+
+Operators tune these per deployment based on hardware. The orchestrator also enforces a global ceiling of 24 hours regardless of per-op configuration.
+
+**Tile checkpointing for Op B/D/E.** For grid and voxel runs the engine partitions the AOI into tiles (default 256×256 px raster tiles for Op B/D; one altitude slab for Op E voxel) and persists each completed tile to the canonical artifact incrementally. The Run carries `completed_tile_count` and `total_tile_count`. A Run that hits EXPIRED can be resumed via `POST /v1/runs/{id}/resume`; the orchestrator transitions to RESUMING, replans only the un-completed tiles, then transitions to RUNNING and continues. Each resume increments `resume_count`. Op A is single-shot — it has no tile granularity and cannot be resumed; an EXPIRED Op A must be re-submitted as a new Run.
+
+Sync calls hold the HTTP response until COMPLETED/PARTIAL/FAILED, OR the response is auto-promoted to async at `sync_budget_seconds` (response returns `202`; the underlying Run continues running and reaches its terminal state normally). The Run record persists with the same status taxonomy regardless of how the HTTP response was shaped; the Run's `cancellation_reason` is `"sync_budget_exceeded"` only on the HTTP response, not on the Run itself (and the Run schema's `cancellation_reason` enum reflects this — it does not list `sync_budget_exceeded`).
 
 ### 8.2 Retention
 
@@ -1074,9 +1171,9 @@ flowchart LR
 
 **Pinning.** `POST /v1/runs/{id}/pin` and `…/unpin` set/clear the pin flag. Pinned runs' canonical artifacts never expire; derivatives still cap at 24 h (regenerable from the pinned canonicals at any time).
 
-**Comparison auto-pin.** A Run referenced by a Comparison/Plan is automatically pinned for as long as that Comparison exists.
+**Comparison auto-pin.** A Run referenced by a Comparison/Plan is automatically pinned for as long as that Comparison exists. A Run may be cited by multiple Comparisons; `Run.comparison_ids[]` carries the full set.
 
-**Pinned-run cap.** `max_pinned_runs` per key (default **100**) prevents runaway auto-pinning. Pin operations beyond the cap return `429 PINNED_RUN_CAP_EXCEEDED` with the oldest pin's run id surfaced for the caller to consider unpinning.
+**Pinned-run cap.** `max_pinned_runs` per key (default **100**) prevents runaway auto-pinning. Direct `:pin` operations beyond the cap return `429 PINNED_RUN_CAP_EXCEEDED` with the oldest pin's run id surfaced for the caller to consider unpinning. **Comparison creation that would exceed the cap** is rejected at create time with `409 PINNED_RUN_CAP_WOULD_BE_EXCEEDED { current_pinned, would_pin, cap }` — the caller must raise the cap or pin fewer runs.
 
 **Per-key storage quota.** `storage_quota_bytes` per key (default **10 GiB**, deployment-configurable). When exceeded, new submissions return `429 STORAGE_QUOTA_EXCEEDED` with the top 5 storage-consuming runs surfaced in the response. Set to `0` to disable the quota.
 
@@ -1086,9 +1183,12 @@ flowchart LR
 
 ### 8.3 Reproducibility
 
-- Every Run records `engine_version`, `engine_major`, `models_used` (with model plugin versions), `data_layer_versions` (per-layer source + version + `content_sha256`), and `inputs_resolved` (full inlined snapshot of all referenced entities; asset references appear as immutable `sha256:` content hashes).
-- `POST /v1/runs/{id}/replay` resubmits the run with the same inputs against the engine version pinned in the original run's `engine_major`. The new Run record links via `replay_of_run_id`.
-- Cross-major replay fails with `REPLAY_ACROSS_ENGINE_MAJOR` unless `force_replay_across_major: true` is set on the replay request. The new Run records both `replay_of_run_id` and `replay_engine_major_drift: <old → new>`.
+- Every Run records `engine_version`, `engine_major`, `models_used` (with `name`, `version`, `plugin_major` per entry — covering both propagation and link-type plugins), `data_layer_versions` (per-layer source + version + `content_sha256`), and `inputs_resolved` (full inlined snapshot of all referenced entities; asset references appear as immutable `sha256:` content hashes).
+- `inputs_resolved_sha256` uses RFC 8785 (JCS) canonicalization (§3.3). Two implementations producing different bytes for the same logical Run is a bug — see the golden vector in [`seed/test-vectors/canonicalization-vector.json`](seed/test-vectors/canonicalization-vector.json).
+- `POST /v1/runs/{id}/replay` resubmits the run with the same inputs against the engine version pinned in the original run's `engine_major` and the plugin majors pinned in the original run's `models_used[].plugin_major`. The new Run record links via `replay_of_run_id`.
+- **Engine major drift** at replay time fails with `REPLAY_ACROSS_ENGINE_MAJOR` unless `force_replay_across_major: true` is set. The new Run records `replay_engine_major_drift: "<old → new>"`.
+- **Plugin major drift** is detected per-plugin; if any plugin's currently-registered major differs from the Run's recorded `plugin_major`, replay fails with `REPLAY_ACROSS_PLUGIN_MAJOR` unless `force_replay_across_major: true` is set. Each per-plugin drift is recorded in `replay_plugin_major_drift[]` on the new Run, plus the corresponding warning (`MODEL_PLUGIN_MAJOR_DRIFT` or `LINK_TYPE_PLUGIN_MAJOR_DRIFT`).
+- **Reclassification on replay.** The replay request may include `reclassify_on_replay: true` (default `false`); when true the orchestrator re-runs the Appendix E auto-classification pass against the *current* configured restricted-species polygons and may upgrade `sensitivity_class`. When false the replay carries the original Run's class.
 - **Byte-identical replay** requires lossless settings (notably `voxel_lossless: true`). Otherwise replay is **semantically equivalent within the documented quantization budgets** (default 0.5 dB on voxel).
 
 ### 8.4 Auth & rate limiting
@@ -1148,6 +1248,7 @@ When deployed via the bundled Docker Compose stack on a single machine:
 - Engine version is a single semver string stamped on every Run. The `engine_major` field is broken out for replay-compatibility checks.
 - Breaking changes to model defaults, clutter taxonomies, or output formats bump the major version. Operators may pin engine version per deployment.
 - Standard profile library and system ClutterTables also have versions; updates ship as additive new versions, never in-place mutations of existing ones.
+- **Composed-version envelope.** A Run's reproducibility envelope is the tuple `(engine_major, [(plugin_name, plugin_major) for plugin in models_used], data_layer_versions[], standard_profile_library_version)`. Each axis may evolve independently. Replay enforces compatibility along the engine and plugin axes (§8.3); the data-layer axis is enforced by the asset content-hash mechanism (§3.5); the standard profile library is `system`-owned and its versions are immutable, so Run snapshots in `inputs_resolved` are sufficient.
 
 ### 8.8 Performance characterization
 
@@ -1295,13 +1396,21 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 | `LAYER_GONE` | Replay attempted against AOI Pack tiles that have been GC'd. |
 | `STORAGE_QUOTA_EXCEEDED` | Per-key storage quota would be exceeded by this submission. |
 | `PINNED_RUN_CAP_EXCEEDED` | Pin operation would exceed `max_pinned_runs`. |
+| `PINNED_RUN_CAP_WOULD_BE_EXCEEDED` | Comparison creation that would auto-pin more runs than `max_pinned_runs`. The error payload carries `current_pinned`, `would_pin`, `cap` so the caller can resolve. |
 | `AOI_OUT_OF_BBOX` | Analysis geometry outside referenced AOI Pack's bbox. |
+| `BBOX_CROSSES_ANTIMERIDIAN_NOT_SUPPORTED` | A bbox or polygon would cross the antimeridian (`west > east`). Out of v1 scope (§5.5). |
+| `BBOX_ORDERING_INVALID` | Any range-shaped field violates ordering (bbox `south < north` and `west < east`; freq `min_mhz < max_mhz`; altitudes `min < max`; EIRP `min < max`). |
+| `UNSUPPORTED_CRS` | BYO uploaded data is not in EPSG:4326 (§5.5/§5.6). |
 | `BYO_LAYER_VALIDATION_FAILED` | Caller-uploaded raster/vector failed CRS / extent / datatype checks. |
 | `VOXEL_NOT_AVAILABLE` | Slice request against a Run that did not produce a `voxel` canonical. |
 | `REPLAY_ACROSS_ENGINE_MAJOR` | Replay would cross an engine major boundary; set `force_replay_across_major: true` to override. |
+| `REPLAY_ACROSS_PLUGIN_MAJOR` | Replay would cross a registered plugin's major boundary relative to the original Run. Set `force_replay_across_major: true` to override (the flag spans both engine and plugin axes). |
+| `MODEL_PLUGIN_CRASH` | A propagation- or link-type plugin raised an uncaught exception during the Run; the Run was retried once on a fresh worker before being marked FAILED. |
 | `REGULATORY_LIMIT_EXCEEDED` | A Tx's effective EIRP, declared duty cycle, or declared bandwidth exceeds the matching band's cap in the resolved `regulatory_profile_ref`, AND the request set `enforce_regulatory: true`. (§3.7) |
 | `REGULATORY_BAND_UNCOVERED` | A Tx's frequency lies outside every band in the resolved `regulatory_profile_ref`, AND the request set `enforce_regulatory: true`. (§3.7) |
 | `OPSEC_CLASSIFICATION_REQUIRED` | The resolved geometry intersects a configured `restricted_species` polygon and the deployment's policy requires explicit `sensitivity_class` declaration on submission. (Appendix E) |
+| `SCOPE_INSUFFICIENT` | The calling key lacks a scope required by the operation (§8.4). |
+| `WEBHOOK_CHALLENGE_FAILED` | Webhook URL did not echo the registration challenge within 5 s (§2.4). |
 
 ### Warnings (run succeeds, possibly PARTIAL)
 
@@ -1319,8 +1428,16 @@ All structured codes returned via `error.code` (4xx/5xx responses or run failure
 | `REGULATORY_LICENSE_NOTICE` | Matched regulatory band has `license_class != license_exempt`. Always advisory regardless of `enforce_regulatory`. (§3.7) |
 | `OPSEC_AUTO_CLASSIFIED` | Submission was auto-classified to a higher `sensitivity_class` than declared (e.g., AOI intersected a `restricted_species` polygon). The Run record carries the auto-applied class; subsequent artifacts redact accordingly. (Appendix E) |
 | `OPSEC_REDACTION_APPLIED` | Returned artifact set has been redacted per the Run's `sensitivity_class`. The warning's `detail` lists the redacted artifact keys. (Appendix E) |
+| `POLAR_PROJECTION_DEGRADED` | AOI extends beyond ±85° latitude; engine processed it in EPSG:3413/3031 with degraded accuracy near the poles (§5.5). |
+| `MODEL_PLUGIN_MAJOR_DRIFT` | Replay was permitted across a propagation-model plugin's major version (`force_replay_across_major: true`); recorded per-plugin in `replay_plugin_major_drift[]`. |
+| `LINK_TYPE_PLUGIN_MAJOR_DRIFT` | Replay was permitted across a link-type plugin's major version. |
+| `RESUMED_FROM_CHECKPOINT` | Run was resumed via `POST /v1/runs/{id}/resume` from an EXPIRED state; emitted on the resumed Run. |
+| `GEOTIFF_STACK_FROM_GEOTIFFS` | Caller requested `geotiff_stack` on an Op E run that did not produce a `voxel` canonical; engine substituted a per-altitude `geotiff` collection. |
+| `SCENARIO_FALLBACK` | Auto-select couldn't map `(operation, link_type, geometry)` to a scenario via the §4.4 table; fell back to `terrestrial_p2p` / `terrestrial_area`. |
 
 ### Filter reasons (informational, on PvO and grid sampling)
+
+Filter reasons are reported in the PvO output's `filter_reasons[]` block (one entry per `{code, count, detail}`). They are not errors and not warnings — runs with filtered points still complete; the filter report exists for transparency.
 
 | Code | When |
 |---|---|
@@ -1464,3 +1581,28 @@ A key without `opsec.read_restricted_species` cannot **submit** a `restricted_sp
 - **§4.6 (new)** — Link-type plugin contract parallel to §4.2 model plugin contract; declares `LINK_TYPE_NOT_REGISTERED` (Appendix D).
 - **§6.2, §7.3, Appendix B** — `drtk` link-type renamed to `rtk` (RTK is the general concept; "relay" is not). Output keys `drtk_pass_fail` / `drtk_range_envelope` → `rtk_pass_fail` / `rtk_range_envelope`.
 - **§3.4, §4.1, §4.4, §4.6, §5.4, §6.2, §7.3, Appendix B** (post-review patch) — Three new mermaid diagrams (12-stage pipeline, model auto-select decision, fidelity-tier resolution). New bundled `vhf_telemetry` link-type plugin (148–152 / 216–220 MHz narrowband wildlife/asset trackers) with declared outputs (`vhf_detection_probability`, `vhf_bearing_quality`, `vhf_range_envelope`) and accepted observed metrics (`detection_count`, `bearing_quality`). Standard profile library expanded with Yagi/log-periodic antennas, VHF telemetry collars (large/small mammal), Meshtastic-class 915 MHz, LTE Cat-M1 / NB-IoT, AIS-like 162 MHz, and an Iridium-SBD scaffold profile. Seed library materialized as `seed/standard-profile-library.json`.
+
+### v2 cleanup pass (2026-04-26 — post-audit)
+
+Cross-artifact cleanup retiring the audit findings catalogued in [`docs/cleanup-plan.md`](../../../cleanup-plan.md). All four canonical surfaces (spec / OpenAPI / JSON Schema / seeds) updated in lockstep; no behavior reversed.
+
+- **§3.2 (AOIPack)** — flat `dtm_ref` / `dsm_ref` / `clutter_ref` / `buildings_ref` field set replaced with a nested `layers: { dtm: AOILayer, dsm: AOILayer, clutter: AOILayer, buildings: AOILayer }` object that carries per-layer source / asset_ref / upstream / version / sha256 metadata. Spec / OpenAPI / JSON Schema all align on the nested shape. ClutterTable definition restated to keep `depolarization_factor` nested inside each `class_table` row (matches OpenAPI and seed); per-class attenuation is documented as **dB per 100 m of path**, with linear-in-dB interpolation across declared anchor frequencies and nearest-anchor fallback outside.
+- **§3.3 (Run record)** — `comparison_id` (singular) replaced with `comparison_ids[]`. New fields `resume_count`, `completed_tile_count`, `total_tile_count`, `replay_plugin_major_drift[]`. `cancellation_reason` enum tightened to `user | expired | null` (`sync_budget_exceeded` is HTTP-response-only per §8.1). RESUMING added to the status enum.
+- **§3.3 / §8.3** — `inputs_resolved_sha256` canonicalization rule frozen as RFC 8785 (JSON Canonicalization Scheme). Replay rules extended to enforce per-plugin major drift (new error `REPLAY_ACROSS_PLUGIN_MAJOR`, new warnings `MODEL_PLUGIN_MAJOR_DRIFT` / `LINK_TYPE_PLUGIN_MAJOR_DRIFT`).
+- **§3.4** — `wildlife-collar-vhf-large` corrected from "~1 W EIRP" to "~10 mW EIRP class" (real wildlife collars are sub-100 mW).
+- **§3.5** — asset reference counting now incorporates Runs from SUBMITTED through terminal state, closing the GC race that could delete an asset under an in-flight Run. New `POST /v1/assets/{id}:refresh_part_urls` endpoint for multipart uploads that span more time than the original part expiry.
+- **§4.0 (Op E inline)** — alternative shape changed from `bbox + altitudes[]` (never realized in any schema) to `aoi + altitude_step_m` (matches Operating Volume entity and the existing schemas).
+- **§4.1 (stage 6)** — renamed "Apply clutter overlay" → "Apply clutter overlay and building loss" so the §5.1 building-loss reference resolves to a real stage step.
+- **§4.2** — `PathLossResult` shape defined explicitly (was referenced but undefined). Plugin lifecycle (`init` / `validate_inputs` / `predict` / `teardown`), entry-point loading, sandbox model, version-compat rules added. New error `MODEL_PLUGIN_CRASH`.
+- **§4.4** — `(operation, link_type, geometry) → scenario` mapping table frozen. `scenario_suitability` enum closed (`indoor_outdoor` added). New warning `SCENARIO_FALLBACK` for unmapped combinations.
+- **§4.5** — slant-45 alignment row clarified; the stage requires antennas to declare `slant_polarization_orientation_deg` ∈ {0, 90, null}, with null treated as worst-case 20 dB plus `POLARIZATION_DEFAULTED` warning.
+- **§4.6** — `LinkBudget` argument shape pinned for `LinkTypePluginInterface.emit`. Plugin lifecycle hooks added.
+- **§5.5 / §5.6** — coordinate / projection / antimeridian / polar / datum rules locked: WGS84-only inputs (BYO non-WGS84 → `UNSUPPORTED_CRS`); `west > east` rejected (`BBOX_CROSSES_ANTIMERIDIAN_NOT_SUPPORTED`); ±85° latitude warns `POLAR_PROJECTION_DEGRADED`; internal projection family chosen by AOI region (EPSG:3035 EU, EPSG:9311 NA, computed-LAEA elsewhere; UTM for sub-50 km AOIs in a single zone). Bbox / freq / altitude / EIRP ordering rules made explicit (`BBOX_ORDERING_INVALID`).
+- **§6.1** — `path_profile` row clarified as canonical for Op A and derivative for Ops B/C/D/E. `geotiff_stack` row clarified as derivative-only (with fallback warning `GEOTIFF_STACK_FROM_GEOTIFFS` when a Run did not produce a `voxel`).
+- **§7.3 / Appendix D** — Filter-reason model formalized as a separate report block (`filter_reasons[]`). Filter reasons remain in Appendix D, no longer mixed with errors / warnings.
+- **§8.1** — RESUMING state added; per-op timeout defaults table (60 s / 30 min / 30 min / 60 min / 4 h for A/B/C/D/E plus a 24 h global ceiling); 60 s hard cancellation upper bound. Tile-checkpointed Op B/D/E runs can be resumed via `POST /v1/runs/{id}/resume`. Comparison creation that would exceed `max_pinned_runs` is rejected with `409 PINNED_RUN_CAP_WOULD_BE_EXCEEDED`.
+- **§8.7** — composed-version envelope (engine + plugins + data layers + standard library) called out explicitly.
+- **§8.4 / OpenAPI** — auth scopes documented on the `ApiKey` securityScheme and on each operation's `description`. New error `SCOPE_INSUFFICIENT`.
+- **OpenAPI** — new endpoints `PATCH /v1/runs/{id}` (sensitivity upgrade per Appendix E.6), `POST /v1/runs/{id}/resume`, `POST /v1/assets/{id}:refresh_part_urls`. Replay request body extended with `reclassify_on_replay`. New schemas `Sha256Hex`, `WebhookEvent`, `WebhookDelivery`, `FilterReason`. `LinkType` / `OutputKey` / `MeasurementPoint.observed_metric` enums extended with `vhf_telemetry` and the VHF outputs / metrics. `AssetSession` gains a `discriminator: mode` mapping. Op E voxel adds a 200 sync response. SHA-256 fields use `Sha256Identifier` (with `sha256:` prefix) for asset IDs and `Sha256Hex` (raw hex) for content fields.
+- **JSON Schema** — `InlineAOIPack` rebuilt around the nested-`layers` shape. `LatLonAlt` renamed `alt_m_agl` → `altitude_m`, `alt_reference` → `altitude_reference`. Op E inline alternative uses `altitude_step_m` (was `alt_step_m`). New `AOILayer` def.
+- **Seed** — added `pmr-446-446mhz` RadioProfile + `pmr-446-handheld` EquipmentProfile (replaces the broken `ranger-vhf-handheld-comms` scenario reference). Added `iot-endpoint-patch-806` and `iot-endpoint-patch-1800` antennas. Added `drone-onboard-omni-2_4ghz-2dbi` antenna and `drone-onboard-c2-2_4ghz` EquipmentProfile (replaces the broken `anti-poaching-drone-dock` rx_template reference). `lte-handset` and `camera-trap-lte-catm1-rx` re-paired with band-correct antennas. `wildlife-collar-loop-150mhz` renamed to `wildlife-collar-loop-vhf-h`. `meshtastic-ranger-camp-relay` scenario corrected to `rendered_cross_section`. Clutter attenuation unit codified as dB per 100 m everywhere.

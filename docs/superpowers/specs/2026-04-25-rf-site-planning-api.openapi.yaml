@@ -268,7 +268,7 @@ paths:
     post:
       tags: [measurements]
       operationId: appendMeasurements
-      description: Chunked append for ongoing telemetry. Creates a new Measurement Set version (light copy-on-write); point-level dedup by (lat, lon, alt_m_agl, freq_mhz, timestamp).
+      description: Chunked append for ongoing telemetry. Creates a new Measurement Set version (light copy-on-write); point-level dedup by (lat, lon, altitude_m, freq_mhz, timestamp).
       parameters:
         - { in: header, name: Idempotency-Key, required: true, schema: { type: string } }
       requestBody:
@@ -308,6 +308,35 @@ paths:
       tags: [assets]
       operationId: abortAssetUpload
       responses: { '204': { description: Aborted; uploaded parts reclaimed. } }
+  /assets/{id}:refresh_part_urls:
+    parameters: [{ in: path, name: id, required: true, schema: { $ref: '#/components/schemas/AssetId' } }]
+    post:
+      tags: [assets]
+      operationId: refreshAssetPartUrls
+      description: |
+        Reissue presigned PUT URLs for any not-yet-completed parts of a multipart upload (spec §3.5).
+        Used when an upload spans more time than the original `expires_at` of one or more parts.
+        Already-completed parts are not reissued. Required scope: `catalog.write`.
+      responses:
+        '200':
+          description: Fresh part URLs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [parts]
+                properties:
+                  parts:
+                    type: array
+                    items:
+                      type: object
+                      required: [part_number, upload_url, expires_at]
+                      properties:
+                        part_number: { type: integer, minimum: 1 }
+                        upload_url:  { type: string, format: uri }
+                        expires_at:  { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Upload already completed or aborted.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
   /assets/{id}:
     parameters: [{ in: path, name: id, required: true, schema: { $ref: '#/components/schemas/AssetId' } }]
     get:
@@ -368,10 +397,19 @@ paths:
       tags: [analyses]
       operationId: submitOpE
       summary: Op E — 3D / volumetric coverage.
+      description: |
+        Op E defaults to async because most voxel runs exceed the sync budget. Callers may force sync via
+        `mode: "sync"`; the orchestrator will auto-promote to async on overrun (HTTP 202) per §2.3.
+        Required scope: `runs.submit`.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpE_Voxel' } } } }
       responses:
-        '202': { description: Async (default for Op E)., content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '200':
+          description: 'Sync run completed (only when sync mode was explicitly requested and the budget held).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } }
+        '202':
+          description: 'Async (default for Op E, or auto-promoted from sync).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } }
         '422': { $ref: '#/components/responses/Unprocessable' }
 
   # ── Runs ─────────────────────────────────────────────────────────────
@@ -380,11 +418,33 @@ paths:
     get:
       tags: [runs]
       operationId: getRun
+      description: 'Required scope: `runs.read` (plus `opsec.read_org` / `opsec.read_restricted` for Runs at the corresponding sensitivity class).'
       responses: { '200': { description: Run record., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+    patch:
+      tags: [runs]
+      operationId: patchRun
+      description: |
+        Mutate a small set of post-submission Run fields (Appendix E.6). Only `sensitivity_class` is allowed,
+        and only as an upgrade (more-restrictive); downgrades require an admin scope. Required scope: `runs.write`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sensitivity_class: { $ref: '#/components/schemas/SensitivityClass' }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '403': { description: Sensitivity downgrade attempted without admin scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
     delete:
       tags: [runs]
       operationId: cancelRun
-      description: Cancellation is honored at next stage/sub-stage boundary (§8.1; bounded by `cancellation_check_seconds`).
+      description: |
+        Cancellation is honored at next stage/sub-stage boundary (§8.1; bounded by `cancellation_check_seconds`,
+        with a 60 s hard ceiling). Required scope: `runs.cancel`.
       responses: { '202': { description: Cancellation accepted. }, '404': { $ref: '#/components/responses/NotFound' } }
   /runs/{id}/status:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
@@ -397,19 +457,36 @@ paths:
     post:
       tags: [runs]
       operationId: replayRun
-      description: 'Resubmits the original run against the engine major recorded on it. Cross-major requires `force_replay_across_major: true`.'
+      description: |
+        Resubmit the original run against the engine major recorded on it. Cross-major requires
+        `force_replay_across_major: true` (Appendix E.6). Required scope: `runs.submit`.
       requestBody:
         content:
           application/json:
             schema:
               type: object
               properties:
-                force_replay_across_major: { type: boolean, default: false }
+                force_replay_across_major: { type: boolean, default: false, description: 'Allow the replay to run on a different engine major than the one originally recorded.' }
+                reclassify_on_replay:      { type: boolean, default: false, description: 'Re-evaluate Appendix E auto-classification against the current configured restricted-species polygons. When false (default) the replay carries the original Run''s `sensitivity_class`.' }
                 mode: { type: string, enum: [sync, async, auto] }
       responses:
         '200': { description: Sync replay completed., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
         '202': { description: Async replay accepted., content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
         '422': { $ref: '#/components/responses/Unprocessable' }
+  /runs/{id}/resume:
+    parameters: [{ $ref: '#/components/parameters/EntityId' }]
+    post:
+      tags: [runs]
+      operationId: resumeRun
+      description: |
+        Resume a Run that reached the EXPIRED terminal state, picking up at the first incomplete tile
+        recorded in `Run.completed_tile_count` (spec §8.1). The Run transitions through the new RESUMING
+        state, then back to RUNNING and on to its next terminal state. `resume_count` is incremented
+        on the Run record. Required scope: `runs.submit`.
+      responses:
+        '202': { description: Resume accepted; the run will continue asynchronously., content: { application/json: { schema: { $ref: '#/components/schemas/RunAccepted' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Run is not in EXPIRED.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
   /runs/{id}/pin:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
     post:
@@ -494,9 +571,9 @@ paths:
       - { $ref: '#/components/parameters/EntityId' }
       - { in: query, name: bbox,      schema: { type: string, description: 's,w,n,e' } }
       - { in: query, name: altitudes, schema: { type: string, description: 'comma-separated discrete altitudes, m AGL' } }
-      - { in: query, name: alt_min,   schema: { type: number } }
-      - { in: query, name: alt_max,   schema: { type: number } }
-      - { in: query, name: alt_step,  schema: { type: number } }
+      - { in: query, name: altitude_min,  schema: { type: number } }
+      - { in: query, name: altitude_max,  schema: { type: number } }
+      - { in: query, name: altitude_step, schema: { type: number } }
       - { in: query, name: format,    required: true, schema: { type: string, enum: [geotiff, geotiff_stack, voxel_subset, json_point_grid] } }
       - { in: query, name: color_map, schema: { type: string } }
     get:
@@ -576,6 +653,27 @@ components:
       type: apiKey
       in:   header
       name: X-Api-Key
+      description: |
+        Single-tenant API key carried in the `X-Api-Key` header. Each key has a
+        scope set assigned by the deployment operator (spec §8.4); the API rejects
+        a request whose target operation requires a scope the calling key does not
+        carry, with `403` and `code: SCOPE_INSUFFICIENT`.
+
+        Defined scopes:
+          - catalog.read       — list/get any catalog entity
+          - catalog.write      — create/update/delete (soft) any catalog entity
+          - measurements.read  — list/get Measurement Sets
+          - measurements.write — create/update/append Measurement Sets
+          - runs.submit        — submit analyses, replay, resume
+          - runs.read          — read Runs and their artifacts
+          - runs.cancel        — cancel a running Run
+          - runs.write         — pin/unpin/PATCH Runs
+          - opsec.read_org     — read `org_internal` and `location_redacted` Runs
+          - opsec.read_restricted — read `restricted_species` Runs
+          - admin              — webhook administration, secret rotation
+
+        A scope-of-`catalog.*` placeholder in operation descriptions means
+        any of `catalog.read` / `catalog.write` as appropriate for the verb.
 
   parameters:
     Cursor:        { in: query,  name: cursor,           schema: { type: string } }
@@ -639,13 +737,20 @@ components:
             - LAYER_GONE
             - STORAGE_QUOTA_EXCEEDED
             - PINNED_RUN_CAP_EXCEEDED
+            - PINNED_RUN_CAP_WOULD_BE_EXCEEDED
             - AOI_OUT_OF_BBOX
+            - BBOX_CROSSES_ANTIMERIDIAN_NOT_SUPPORTED
+            - BBOX_ORDERING_INVALID
+            - UNSUPPORTED_CRS
             - BYO_LAYER_VALIDATION_FAILED
             - VOXEL_NOT_AVAILABLE
             - REPLAY_ACROSS_ENGINE_MAJOR
+            - REPLAY_ACROSS_PLUGIN_MAJOR
             - REGULATORY_LIMIT_EXCEEDED
             - REGULATORY_BAND_UNCOVERED
             - OPSEC_CLASSIFICATION_REQUIRED
+            - SCOPE_INSUFFICIENT
+            - WEBHOOK_CHALLENGE_FAILED
         warnings:
           type: array
           items:
@@ -667,7 +772,28 @@ components:
                   - REGULATORY_LICENSE_NOTICE
                   - OPSEC_AUTO_CLASSIFIED
                   - OPSEC_REDACTION_APPLIED
+                  - POLAR_PROJECTION_DEGRADED
+                  - MODEL_PLUGIN_MAJOR_DRIFT
+                  - LINK_TYPE_PLUGIN_MAJOR_DRIFT
+                  - RESUMED_FROM_CHECKPOINT
               detail: { type: string }
+
+    FilterReason:
+      type: object
+      description: |
+        Informational filter applied to a Measurement Set point during predicted-vs-observed
+        reporting (spec §7.3). Filtered points do not fail the run; they are reported in the
+        `filter_reasons` block of the PvO output for transparency.
+      required: [code, count]
+      properties:
+        code:
+          type: string
+          enum:
+            - OBSERVED_METRIC_MISMATCH
+            - OBSERVATION_OUT_OF_GEOMETRY
+            - OBSERVATION_OUT_OF_FREQ_TOLERANCE
+        count:  { type: integer, minimum: 0, description: 'Number of points filtered with this reason.' }
+        detail: { type: string }
 
     Page:
       type: object
@@ -689,6 +815,12 @@ components:
     AssetId:
       type: string
       pattern: '^sha256:[0-9a-f]{64}$'
+      description: Content-addressed asset identifier with `sha256:` prefix (spec §3.5).
+
+    Sha256Hex:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+      description: Lowercase hex SHA-256 digest (no `sha256:` prefix). Used in content-hash fields where the raw digest is wanted instead of the asset identifier.
 
     LatLon:
       type: object
@@ -699,12 +831,12 @@ components:
 
     LatLonAlt:
       type: object
-      required: [lat, lon, alt_m_agl]
+      required: [lat, lon, altitude_m]
       properties:
         lat: { type: number, minimum: -90,  maximum: 90 }
         lon: { type: number, minimum: -180, maximum: 180 }
-        alt_m_agl:     { type: number }
-        alt_reference: { type: string, enum: [agl, amsl], default: agl }
+        altitude_m:     { type: number }
+        altitude_reference: { type: string, enum: [agl, amsl], default: agl }
 
     Bbox:
       type: object
@@ -740,9 +872,9 @@ components:
       description: |
         Open string. `generic` is the only built-in core value; other values
         are registered by link-type plugins (spec §4.6). Bundled plugins ship
-        `lora`, `lte`, `drone_c2`, `rtk`. Server returns
+        `lora`, `lte`, `drone_c2`, `rtk`, and `vhf_telemetry`. Server returns
         LINK_TYPE_NOT_REGISTERED if the value is not registered.
-      examples: [generic, lora, lte, drone_c2, rtk]
+      examples: [generic, lora, lte, drone_c2, rtk, vhf_telemetry]
     FidelityTier: { type: string, enum: [T0_FREE_SPACE, T1_TERRAIN, T2_TERRAIN_PLUS_CLUTTER, T3_SURFACE, T4_SURFACE_PLUS_BUILDINGS] }
     Mode:         { type: string, enum: [sync, async, auto], default: auto }
     PropagationModel: { type: string, enum: [auto, p1812, p526, itm, p528, p530, friis, two_ray], default: auto }
@@ -790,8 +922,17 @@ components:
         h_beamwidth_deg: { type: number }
         v_beamwidth_deg: { type: number }
         electrical_downtilt_deg: { type: number }
+        slant_polarization_orientation_deg:
+          type: [number, "null"]
+          enum: [0, 90, null]
+          description: |
+            Mechanical orientation of a slant-45 antenna in degrees relative to a chosen reference (0 = +45°, 90 = −45°).
+            Only meaningful when `polarization: slant-45`. When null (or omitted) the engine treats slant-45 vs slant-45
+            as worst-case 20 dB cross-pol with `POLARIZATION_DEFAULTED` warning (spec §4.5).
         format: { type: string, enum: [msi, adf, ant, csv] }
         pattern_asset_ref: { $ref: '#/components/schemas/AssetId' }
+        notes: { type: string }
+        tags:  { type: array, items: { type: string } }
 
     RadioProfile:
       type: object
@@ -840,6 +981,7 @@ components:
         mfr:   { type: string }
         model: { type: string }
         notes: { type: string }
+        tags:  { type: array, items: { type: string } }
 
     AOILayer:
       type: object
@@ -849,7 +991,7 @@ components:
         upstream_source: { type: string }
         upstream_version: { type: string }
         acquired_at:   { type: string, format: date-time }
-        content_sha256: { type: string }
+        content_sha256: { $ref: '#/components/schemas/Sha256Hex' }
         resolution_m: { type: number }
 
     AOIPack:
@@ -876,6 +1018,12 @@ components:
     ClutterTable:
       type: object
       required: [name, taxonomy_id, class_table]
+      description: |
+        Per-class clutter attenuation lookup (spec §3.2, §4.5). `class_table` keys are taxonomy class IDs (strings);
+        each value carries an `attenuation_db_per_band` map from anchor-frequency-MHz (string) to **dB per 100 m of
+        path traversed in that class**, plus a per-class `depolarization_factor` ∈ [0, 1] consumed by the polarization
+        mismatch model (§4.5). The engine accumulates attenuation linearly along path segments and interpolates between
+        anchor frequencies linearly in dB, falling back to the nearest anchor outside the declared range.
       properties:
         id:      { type: string, readOnly: true }
         name:    { type: string }
@@ -887,17 +1035,20 @@ components:
           additionalProperties:
             type: object
             properties:
+              label: { type: string }
               attenuation_db_per_band:
                 type: object
+                description: 'Map: anchor-frequency-MHz (string) → dB per 100 m path in this class.'
                 additionalProperties: { type: number }
               depolarization_factor: { type: number, minimum: 0, maximum: 1 }
+              notes: { type: string }
         applicable_freq_bands:
           type: array
           items:
             type: object
             properties:
-              min_mhz: { type: number }
-              max_mhz: { type: number }
+              min_mhz: { type: number, exclusiveMinimum: 0 }
+              max_mhz: { type: number, exclusiveMinimum: 0 }
         notes: { type: string }
 
     OperatingVolume:
@@ -953,12 +1104,19 @@ components:
       properties:
         lat: { type: number, minimum: -90,  maximum: 90 }
         lon: { type: number, minimum: -180, maximum: 180 }
-        alt_m_agl: { type: number }
-        alt_reference: { type: string, enum: [agl, amsl] }
+        altitude_m: { type: number }
+        altitude_reference: { type: string, enum: [agl, amsl] }
         freq_mhz: { type: number, exclusiveMinimum: 0 }
         bandwidth_khz: { type: number }
         observed_signal_dbm: { type: number }
-        observed_metric: { type: string, enum: [rssi, rsrp, rsrq, sinr, snr] }
+        observed_metric:
+          type: string
+          enum: [rssi, rsrp, rsrq, sinr, snr, detection_count, bearing_quality]
+          description: |
+            Metric type. `rssi`/`snr` for `generic` and `lora`; `rsrp`/`rsrq`/`sinr` for `lte`;
+            `detection_count`/`bearing_quality` for `vhf_telemetry`. The engine enforces metric-link_type
+            coherence per spec §7.3 and emits the `OBSERVED_METRIC_MISMATCH` filter reason for points
+            whose metric is incompatible with the matched run's link_type.
         timestamp: { type: string, format: date-time }
         seq: { type: integer, minimum: 0 }
         source: { type: string, enum: [manual, camera_trap_log, drone_telemetry, drive_test, other] }
@@ -1047,7 +1205,7 @@ components:
         filename:     { type: string }
         content_type: { type: string }
         size_bytes:   { type: integer, minimum: 0 }
-        sha256:       { type: string, pattern: '^[0-9a-f]{64}$' }
+        sha256:       { $ref: '#/components/schemas/Sha256Hex' }
         purpose:
           type: string
           enum: [antenna_pattern, site_photo, raster_dtm, raster_dsm, raster_clutter, vector_buildings, measurement_csv, generic]
@@ -1057,12 +1215,19 @@ components:
         - $ref: '#/components/schemas/AssetSessionAlready'
         - $ref: '#/components/schemas/AssetSessionDirect'
         - $ref: '#/components/schemas/AssetSessionMultipart'
+      discriminator:
+        propertyName: mode
+        mapping:
+          already:   '#/components/schemas/AssetSessionAlready'
+          direct:    '#/components/schemas/AssetSessionDirect'
+          multipart: '#/components/schemas/AssetSessionMultipart'
 
     AssetSessionAlready:
       type: object
-      required: [asset_id, already_exists, ready]
+      required: [asset_id, mode, already_exists, ready]
       properties:
         asset_id:       { $ref: '#/components/schemas/AssetId' }
+        mode:           { const: already }
         already_exists: { const: true }
         ready:          { const: true }
 
@@ -1083,7 +1248,7 @@ components:
 
     AssetSessionMultipart:
       type: object
-      required: [asset_id, mode, part_size_bytes, parts, complete_url, abort_url]
+      required: [asset_id, mode, part_size_bytes, parts, complete_url, abort_url, refresh_part_urls_url]
       properties:
         asset_id:        { $ref: '#/components/schemas/AssetId' }
         mode:            { const: multipart }
@@ -1097,8 +1262,9 @@ components:
               part_number: { type: integer, minimum: 1 }
               upload_url:  { type: string, format: uri }
               expires_at:  { type: string, format: date-time }
-        complete_url: { type: string, format: uri }
-        abort_url:    { type: string, format: uri }
+        complete_url:          { type: string, format: uri }
+        abort_url:             { type: string, format: uri }
+        refresh_part_urls_url: { type: string, format: uri, description: 'POST here to obtain fresh presigned URLs for un-completed parts (spec §3.5).' }
 
     AssetCompleteRequest:
       type: object
@@ -1119,7 +1285,7 @@ components:
         asset_id:       { $ref: '#/components/schemas/AssetId' }
         content_type:   { type: string }
         size_bytes:     { type: integer, minimum: 0 }
-        sha256:         { type: string, pattern: '^[0-9a-f]{64}$' }
+        sha256:         { $ref: '#/components/schemas/Sha256Hex' }
         ready:          { type: boolean }
         already_exists: { type: boolean }
 
@@ -1133,12 +1299,12 @@ components:
         submitted_at:        { type: string, format: date-time }
         inputs_resolved_at:  { type: string, format: date-time }
         completed_at:        { type: string, format: date-time }
-        status: { type: string, enum: [SUBMITTED, QUEUED, RUNNING, COMPLETED, PARTIAL, FAILED, CANCELLED, EXPIRED] }
+        status: { type: string, enum: [SUBMITTED, QUEUED, RUNNING, RESUMING, COMPLETED, PARTIAL, FAILED, CANCELLED, EXPIRED] }
         operation: { type: string, enum: [p2p, area, multi_link, multi_tx, voxel] }
         mode_requested: { type: string, enum: [sync, async, auto] }
         mode_executed:  { type: string, enum: [sync, async] }
         inputs_resolved: { type: object }
-        inputs_resolved_sha256: { type: string }
+        inputs_resolved_sha256: { $ref: '#/components/schemas/Sha256Hex' }
         engine_version: { type: string }
         engine_major:   { type: integer }
         models_used:
@@ -1157,10 +1323,29 @@ components:
         warnings: { type: array, items: { type: object, properties: { code: { type: string }, detail: { type: string } } } }
         error: { $ref: '#/components/schemas/ProblemDetail' }
         pinned: { type: boolean }
-        cancellation_reason: { type: [string, "null"], enum: [user, expired, sync_budget_exceeded, null] }
-        comparison_id:        { type: [string, "null"] }
+        cancellation_reason:
+          type: [string, "null"]
+          enum: [user, expired, null]
+          description: |
+            Why the Run reached a terminal CANCELLED state. `sync_budget_exceeded` is intentionally
+            absent: the Run record itself is never marked cancelled by sync-budget overrun (the underlying Run
+            continues running and reaches its own terminal state); `sync_budget_exceeded` only ever appears in the
+            HTTP response (`RunAccepted.reason`) per spec §8.1.
+        comparison_ids:       { type: array, items: { type: string }, description: 'IDs of every Comparison referencing this Run.' }
+        resume_count:         { type: integer, minimum: 0, description: 'Number of times this Run has been resumed from a checkpoint after EXPIRED (spec §8.1).' }
+        completed_tile_count: { type: integer, minimum: 0, description: 'Tiles persisted to the canonical artifact so far (Op B/D/E checkpointed runs).' }
+        total_tile_count:     { type: [integer, "null"], minimum: 0, description: 'Total tiles in this Run, when known.' }
         replay_of_run_id:     { type: [string, "null"] }
         replay_engine_major_drift: { type: [string, "null"], description: "e.g., '1->2'" }
+        replay_plugin_major_drift:
+          type: array
+          description: 'Per-plugin major-version drift relative to the original Run, when replaying across plugin majors.'
+          items:
+            type: object
+            required: [plugin, drift]
+            properties:
+              plugin: { type: string, description: 'Plugin name (e.g., "p1812", "lora").' }
+              drift:  { type: string, description: "e.g., '2->3'" }
         sensitivity_class:    { $ref: '#/components/schemas/SensitivityClass' }
         regulatory_profile_ref_resolved: { type: [string, "null"], description: 'Convenience pointer into inputs_resolved if a regulatory profile was supplied; null otherwise.' }
 
@@ -1179,9 +1364,11 @@ components:
       required: [run_id, status]
       properties:
         run_id: { type: string }
-        status: { type: string, enum: [SUBMITTED, QUEUED, RUNNING, COMPLETED, PARTIAL, FAILED, CANCELLED, EXPIRED] }
+        status: { type: string, enum: [SUBMITTED, QUEUED, RUNNING, RESUMING, COMPLETED, PARTIAL, FAILED, CANCELLED, EXPIRED] }
         stage: { type: string, description: 'Pipeline stage name (§4.1)' }
         stage_progress_pct: { type: number, minimum: 0, maximum: 100 }
+        completed_tile_count: { type: integer, minimum: 0 }
+        total_tile_count:     { type: [integer, "null"], minimum: 0 }
         started_at: { type: string, format: date-time }
 
     ArtifactRef:
@@ -1192,7 +1379,10 @@ components:
         class:         { type: string, enum: [canonical, derivative] }
         content_type:  { type: string }
         size_bytes:    { type: integer, minimum: 0 }
-        sha256:        { type: [string, "null"] }
+        sha256:
+          oneOf:
+            - { $ref: '#/components/schemas/Sha256Hex' }
+            - { type: "null" }
         expires_at:    { type: string, format: date-time }
         download_url:  { type: [string, "null"], format: uri }
         materialized:  { type: boolean }
@@ -1207,14 +1397,47 @@ components:
         url:         { type: string, format: uri }
         verified:    { type: boolean }
         verified_at: { type: string, format: date-time }
-        events:      { type: array, items: { type: string } }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/WebhookEvent' }
 
     WebhookCreate:
       type: object
       required: [url]
       properties:
         url:    { type: string, format: uri }
-        events: { type: array, items: { type: string } }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/WebhookEvent' }
+
+    WebhookEvent:
+      type: string
+      enum:
+        - run.completed
+        - run.partial
+        - run.failed
+        - run.cancelled
+        - run.expired
+        - run.resumed
+
+    WebhookDelivery:
+      type: object
+      description: |
+        HMAC-signed payload posted to a registered webhook URL on terminal-state Run transitions
+        (spec §2.4). Receivers MUST verify `X-Signature: HMAC-SHA256(secret, signed_at + "." + body)`
+        and MUST reject `signed_at` deltas > 5 minutes from local time.
+      required: [event, run_id, status, signed_at, delivery_id, signature_alg]
+      properties:
+        event:                  { $ref: '#/components/schemas/WebhookEvent' }
+        run_id:                 { type: string }
+        status:                 { type: string, enum: [COMPLETED, PARTIAL, FAILED, CANCELLED, EXPIRED, RESUMING] }
+        inputs_resolved_sha256: { $ref: '#/components/schemas/Sha256Hex' }
+        signed_at:              { type: string, format: date-time, description: 'RFC 3339 UTC timestamp when the signature was produced.' }
+        signature_alg:          { type: string, enum: [HMAC-SHA256] }
+        delivery_id:            { type: string, description: 'Unique per-delivery identifier; receivers should dedup on this.' }
+        artifacts_url:          { type: string, format: uri }
+        warnings:               { type: array, items: { type: object, properties: { code: { type: string }, detail: { type: string } } } }
+        error:                  { $ref: '#/components/schemas/ProblemDetail' }
 
     # ── Analysis Requests ─────────────────────────────────────────────
     OutputKey:
@@ -1253,6 +1476,9 @@ components:
         - c2_range_envelope
         - rtk_pass_fail
         - rtk_range_envelope
+        - vhf_detection_probability
+        - vhf_bearing_quality
+        - vhf_range_envelope
 
     MinFidelityCoverage:
       type: object
@@ -1430,7 +1656,7 @@ components:
           required: [operation, tx_sites, rx_template, outputs]
           oneOf:
             - { required: [operating_volume] }
-            - { required: [aoi, alt_step_m] }
+            - { required: [aoi, altitude_step_m] }
           properties:
             operation:        { const: voxel }
             tx_sites:
@@ -1441,4 +1667,4 @@ components:
             operating_volume: { $ref: '#/components/schemas/OperatingVolumeOrInline' }
             aoi:              { $ref: '#/components/schemas/AOIOrInline' }
             resolution_m:     { type: number, exclusiveMinimum: 0 }
-            alt_step_m:       { type: number, exclusiveMinimum: 0 }
+            altitude_step_m:       { type: number, exclusiveMinimum: 0 }

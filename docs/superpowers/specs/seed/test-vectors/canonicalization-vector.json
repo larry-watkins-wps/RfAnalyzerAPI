@@ -1,0 +1,31 @@
+{
+  "comment": "Golden canonicalization vector for `inputs_resolved_sha256` (spec §3.3, §8.3). The canonicalization rule is RFC 8785 (JSON Canonicalization Scheme — JCS): UTF-8, NFC-normalized strings, lexicographic key ordering, no insignificant whitespace, JS Number.toString() for floats. An implementation that does not produce the listed `expected_canonical_bytes` and `expected_sha256` for the listed `input` is broken — fix the implementation, never the vector.",
+  "rule": "RFC 8785 (JCS)",
+  "vector": {
+    "input": {
+      "operation": "p2p",
+      "tx_site": { "lon": 31.624, "lat": -24.012 },
+      "tx_equipment": {
+        "name": "lora-gateway-868-omni-6dbi",
+        "mount_height_m_agl": 12.0,
+        "cable_loss_db": 1.2
+      },
+      "rx_site": { "lat": -24.05, "lon": 31.59 },
+      "rx_equipment": { "ref": "camera-trap-lora-rx", "owner": "shared", "version": "latest" },
+      "outputs": ["link_budget", "path_profile"],
+      "engine_version": "0.2.0",
+      "engine_major": 0,
+      "models_used": [
+        { "name": "ITU-R P.1812", "version": "4-with-clutter", "plugin_major": 4 }
+      ]
+    },
+    "expected_canonical_bytes_utf8": "{\"engine_major\":0,\"engine_version\":\"0.2.0\",\"models_used\":[{\"name\":\"ITU-R P.1812\",\"plugin_major\":4,\"version\":\"4-with-clutter\"}],\"operation\":\"p2p\",\"outputs\":[\"link_budget\",\"path_profile\"],\"rx_equipment\":{\"owner\":\"shared\",\"ref\":\"camera-trap-lora-rx\",\"version\":\"latest\"},\"rx_site\":{\"lat\":-24.05,\"lon\":31.59},\"tx_equipment\":{\"cable_loss_db\":1.2,\"mount_height_m_agl\":12,\"name\":\"lora-gateway-868-omni-6dbi\"},\"tx_site\":{\"lat\":-24.012,\"lon\":31.624}}",
+    "expected_sha256": "TODO-COMPUTE-AT-IMPLEMENTATION-TIME",
+    "notes": [
+      "`mount_height_m_agl: 12.0` canonicalizes to the integer-form `12` per RFC 8785 §3.2.2.3 (trailing-zero floats serialize without decimals).",
+      "Object keys are sorted lexicographically at every nesting depth.",
+      "No whitespace; no trailing newline.",
+      "`expected_sha256` is a placeholder — when the first conformant implementation lands, compute the SHA-256 of the UTF-8 bytes above and replace this string. Subsequent implementations must match."
+    ]
+  }
+}

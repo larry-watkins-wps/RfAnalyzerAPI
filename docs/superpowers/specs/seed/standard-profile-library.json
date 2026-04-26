@@ -125,6 +125,34 @@
       "v_beamwidth_deg": 90
     },
     {
+      "name": "iot-endpoint-patch-806",
+      "kind": "parametric",
+      "pattern_type": "sector",
+      "gain_dbi": 2.0,
+      "polarization": "V",
+      "applicable_polarizations": ["V"],
+      "applicable_bands": [
+        { "min_mhz": 791, "max_mhz": 862 }
+      ],
+      "h_beamwidth_deg": 90,
+      "v_beamwidth_deg": 90,
+      "notes": "LTE Cat-M1 / NB-IoT B20 (806 MHz) endpoint patch. Pair with B20 / B5 sub-1-GHz cellular endpoints."
+    },
+    {
+      "name": "iot-endpoint-patch-1800",
+      "kind": "parametric",
+      "pattern_type": "sector",
+      "gain_dbi": 2.0,
+      "polarization": "V",
+      "applicable_polarizations": ["V"],
+      "applicable_bands": [
+        { "min_mhz": 1710, "max_mhz": 1880 }
+      ],
+      "h_beamwidth_deg": 90,
+      "v_beamwidth_deg": 90,
+      "notes": "LTE B3 (1800 MHz) handset/CPE endpoint patch."
+    },
+    {
       "name": "drone-dock-omni-2_4ghz-5dbi",
       "kind": "parametric",
       "pattern_type": "omni",
@@ -150,6 +178,21 @@
       ],
       "h_beamwidth_deg": 360,
       "v_beamwidth_deg": 30
+    },
+    {
+      "name": "drone-onboard-omni-2_4ghz-2dbi",
+      "kind": "parametric",
+      "pattern_type": "omni",
+      "gain_dbi": 2.0,
+      "polarization": "V",
+      "applicable_polarizations": ["V"],
+      "applicable_bands": [
+        { "min_mhz": 2400, "max_mhz": 2483 },
+        { "min_mhz": 5725, "max_mhz": 5875 }
+      ],
+      "h_beamwidth_deg": 360,
+      "v_beamwidth_deg": 60,
+      "notes": "Onboard antenna for the airborne side of a drone C2 link (smaller, lower-gain than the dock-side omni)."
     },
     {
       "name": "generic-yagi-3el-7dbi-150mhz",
@@ -220,7 +263,7 @@
       "v_beamwidth_deg": 60
     },
     {
-      "name": "wildlife-collar-loop-150mhz",
+      "name": "wildlife-collar-loop-vhf-h",
       "kind": "parametric",
       "pattern_type": "omni",
       "gain_dbi": -3.0,
@@ -232,7 +275,7 @@
       ],
       "h_beamwidth_deg": 360,
       "v_beamwidth_deg": 80,
-      "notes": "Body-worn loop antennas detune ~3 dB versus an ideal whip; modeled as negative gain."
+      "notes": "Body-worn small-loop antenna for VHF wildlife collars in the 148-MHz and 216-MHz tracking bands. H-pol matches the standard 3-element Yagi receiver (`generic-yagi-3el-7dbi-150mhz`) used by hand-held trackers; gain is modeled as -3 dBi to capture body-detuning losses."
     },
     {
       "name": "wildlife-collar-whip-150mhz",
@@ -428,6 +471,18 @@
       "rx_sensitivity_dbm": -110.0,
       "modulation": "GMSK",
       "mode_label": "AIS-Class-B"
+    },
+    {
+      "name": "pmr-446-446mhz",
+      "link_type": "generic",
+      "freq_mhz": 446.1,
+      "bandwidth_khz": 12.5,
+      "tx_power_dbm": 27.0,
+      "rx_sensitivity_dbm": -118.0,
+      "modulation": "FM",
+      "mode_label": "PMR-446-EU",
+      "fade_margin_db_target": 6,
+      "notes": "European PMR-446 voice channel (446.0-446.2 MHz, 0.5 W EIRP cap, license-exempt). US has no equivalent allocation; for North America substitute FRS/GMRS at 462/467 MHz or MURS at 151/154 MHz before running."
     }
   ],
 
@@ -481,10 +536,10 @@
     {
       "name": "camera-trap-lte-catm1-rx",
       "radio_ref":   { "ref": "lte-catm1-band20", "owner": "system" },
-      "antenna_ref": { "ref": "iot-endpoint-patch-868", "owner": "system" },
+      "antenna_ref": { "ref": "iot-endpoint-patch-806", "owner": "system" },
       "mount_height_m_agl": 1.5,
       "cable_loss_db": 0.5,
-      "notes": "Cellular trail-cam variant; uses Cat-M1 to reach the closest tower."
+      "notes": "Cellular trail-cam variant; uses Cat-M1 on B20 (806 MHz) to reach the closest tower."
     },
     {
       "name": "meshtastic-node-915-tx",
@@ -522,10 +577,10 @@
     {
       "name": "wildlife-collar-vhf-small",
       "radio_ref":   { "ref": "vhf-telemetry-216", "owner": "system" },
-      "antenna_ref": { "ref": "wildlife-collar-loop-150mhz", "owner": "system" },
+      "antenna_ref": { "ref": "wildlife-collar-loop-vhf-h", "owner": "system" },
       "mount_height_m_agl": 0.3,
       "cable_loss_db": 0.1,
-      "notes": "Bird / small-mammal tag. Loop antenna body-worn."
+      "notes": "Bird / small-mammal tag at 217 MHz. Loop antenna body-worn (H-pol; matches the 3-element Yagi handheld receiver)."
     },
     {
       "name": "vhf-yagi-handheld-3el",
@@ -562,10 +617,10 @@
     {
       "name": "lte-handset",
       "radio_ref":   { "ref": "lte-band3-1800", "owner": "system" },
-      "antenna_ref": { "ref": "iot-endpoint-patch-868", "owner": "system" },
+      "antenna_ref": { "ref": "iot-endpoint-patch-1800", "owner": "system" },
       "mount_height_m_agl": 1.5,
       "cable_loss_db": 0.0,
-      "notes": "Body-worn handset proxy. Use cautiously: real device patterns are highly orientation-dependent."
+      "notes": "Body-worn handset proxy at LTE B3 (1800 MHz). Use cautiously: real device patterns are highly orientation-dependent."
     },
     {
       "name": "vehicle-tracker-lte-catm1",
@@ -602,6 +657,22 @@
       "mount_height_m_agl": 1.5,
       "cable_loss_db": 0.3,
       "notes": "Scaffold profile: models the terrestrial-visible portion of an Iridium SBD endpoint. The space-segment link itself is out of v1 scope (no satellite link-type plugin ships); the radio_ref here is a placeholder VHF profile so the EquipmentProfile shape round-trips. Do not use for actual link-budget analysis until a satellite link-type plugin is registered (§4.6)."
+    },
+    {
+      "name": "pmr-446-handheld",
+      "radio_ref":   { "ref": "pmr-446-446mhz", "owner": "system" },
+      "antenna_ref": { "ref": "pmr-446mhz-whip-3dbi", "owner": "system" },
+      "mount_height_m_agl": 1.7,
+      "cable_loss_db": 0.0,
+      "notes": "PMR-446 handheld voice radio (rangers, field staff). Effective EIRP ≈ 30 dBm (1 W) before regulator-imposed 0.5 W cap; operators using `enforce_regulatory: true` against an EU PMR-446 RegulatoryProfile will see a `REGULATORY_LIMIT_EXCEEDED` rejection unless tx_power is dropped to ~24 dBm at the radio."
+    },
+    {
+      "name": "drone-onboard-c2-2_4ghz",
+      "radio_ref":   { "ref": "drone-c2-2_4ghz", "owner": "system" },
+      "antenna_ref": { "ref": "drone-onboard-omni-2_4ghz-2dbi", "owner": "system" },
+      "mount_height_m_agl": 0.0,
+      "cable_loss_db": 0.5,
+      "notes": "Airborne side of a 2.4 GHz drone C2 link. Use as `rx_template` in Op E (voxel) and Op B paired with a `drone-dock-c2-2_4ghz` Tx. mount_height_m_agl is 0 because the drone's altitude is captured by the Operating Volume / point altitude at evaluation time, not by mount height."
     }
   ],
 

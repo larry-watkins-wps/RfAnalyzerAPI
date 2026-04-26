@@ -14,12 +14,25 @@ Self-hosted, single-tenant API for RF propagation analysis. Targets field engine
 
 ## Architecture
 
-- Pluggable propagation-model registry + pluggable link-type registry + pipeline-stage engine, 12 stages (§4.1, §4.2, §4.6). `link_type` is an open string; `generic` is core, other values come from link-type plugins (bundled: `lora`, `lte`, `drone_c2`, `rtk`).
+- Pluggable propagation-model registry + pluggable link-type registry + pipeline-stage engine, 12 stages (§4.1, §4.2, §4.6). `link_type` is an open string; `generic` is core, other values come from link-type plugins (bundled: `lora`, `lte`, `drone_c2`, `rtk`, `vhf_telemetry`).
 - Five analysis ops: point-to-point, area, multi-link, multi-Tx, voxel (§4.0).
 - Adaptive geo-data fidelity, five tiers from free-space to DSM+buildings (§5.4).
 - Content-addressed assets (`sha256:` prefix) for binary blobs; reference-counted lifecycle (§3.5).
 - Canonical-vs-derivative artifact split: canonicals persist to per-class TTL, derivatives regenerate from canonicals and cache 24 h (§6, §8.2).
 - `inputs_resolved` is a frozen, fully-inlined snapshot taken at SUBMITTED — every Run is reproducible (§3.1, §8.3).
+
+## Implementation stack
+
+Fixed by [ADR-0001](docs/adr/0001-stack.md): **Python 3.12 + FastAPI + pydantic v2 + uv + ruff + mypy + pytest + structlog + OpenTelemetry + Postgres 16**. Read the ADR for rationale; the rules below are the working agreements an AI session must follow without re-litigating.
+
+- **Spec-first stays canonical.** Edit the spec markdown first; make pydantic models / JSON Schema / OpenAPI / seed match it. Never the other way around.
+- **Pydantic models are the runtime projection of the spec.** Once implementation begins, pydantic emits an OpenAPI under `src/rfanalyzer/_generated/`; CI diffs it against the spec-derived `docs/superpowers/specs/2026-04-25-rf-site-planning-api.openapi.yaml`. Both must agree — if they diverge, fix the model.
+- **The Run record IS the job.** Workers consume SUBMITTED runs via Postgres `SELECT … FOR UPDATE SKIP LOCKED`. No Redis/RabbitMQ/Celery.
+- **One pipeline stage = one module** under `src/rfanalyzer/pipeline/stage_NN_*.py`. One OpenTelemetry span per stage.
+- **Storage is abstracted behind a `StorageProvider` interface** with `STORAGE_PROVIDER` env switch (filesystem / S3 / Azure Blob). Pattern mirrors argus-flight-center's `src/lib/storage.ts`.
+- **Logging field shape mirrors argus-flight-center** for cross-service log aggregation. Use `structlog`; redact `authorization|cookie|password|secret|api_key|*token`.
+- **Generated TypeScript client is the contract argus consumes.** Use `openapi-typescript` + `openapi-fetch`; never hand-write a client.
+- **Plugins load via Python entry points** (`importlib.metadata`). In-process. Sandboxing is deferred to a future ADR — until that lands, do not onboard third-party plugins.
 
 ## Conventions
 

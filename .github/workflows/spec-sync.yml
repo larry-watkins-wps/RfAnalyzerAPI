@@ -1,0 +1,29 @@
+name: spec-sync
+
+on:
+  pull_request:
+    paths:
+      - 'docs/superpowers/specs/**'
+      - 'scripts/check-sync.py'
+      - '.github/workflows/spec-sync.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/superpowers/specs/**'
+      - 'scripts/check-sync.py'
+      - '.github/workflows/spec-sync.yml'
+
+jobs:
+  check-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install validators
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml jsonschema
+      - name: Run cross-artifact sync check
+        run: python scripts/check-sync.py

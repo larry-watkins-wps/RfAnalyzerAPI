@@ -17,7 +17,7 @@ Companion to spec §4.0 (Op E), §6.1 (voxel canonical), §6.6 (slicing).
   "rx_template":      { "ref": "drone-rc-2_4ghz-omni", "owner": "shared" },
   "operating_volume": { "ref": "olifants-flight-envelope-2026q1" },
   "resolution_m":     30,
-  "alt_step_m":       15,
+  "altitude_step_m":       15,
   "outputs":          ["voxel", "c2_pass_fail", "c2_range_envelope", "stats"],
   "voxel_lossless":   false,
   "min_fidelity_tier":"T3_SURFACE",
@@ -25,7 +25,7 @@ Companion to spec §4.0 (Op E), §6.1 (voxel canonical), §6.6 (slicing).
 }
 ```
 
-`operating_volume` is a Reference; alternatively the caller could inline `{ bbox, polygon, altitude_min_m_agl, altitude_max_m_agl, altitude_step_m, home_site_ref? }`. The Operating Volume's altitude range × `alt_step_m` define the voxel's altitude axis. (`home_site_ref` is optional; here `olifants-flight-envelope-2026q1` already pins the dock as its home Site.)
+`operating_volume` is a Reference; alternatively the caller could inline `{ bbox, polygon, altitude_min_m_agl, altitude_max_m_agl, altitude_step_m, home_site_ref? }`. The Operating Volume's altitude range × `altitude_step_m` define the voxel's altitude axis. (`home_site_ref` is optional; here `olifants-flight-envelope-2026q1` already pins the dock as its home Site.)
 
 `min_fidelity_tier: T3_SURFACE` requires the AOI Pack to include DSM; if it doesn't, the run fails fast with `FIDELITY_FLOOR_NOT_MET` (§5.4).
 

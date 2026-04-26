@@ -14,7 +14,7 @@ RfAnalyzer/
 ├── CLAUDE.md                                          AI-assistant working agreements
 ├── .gitignore
 └── docs/superpowers/specs/
-    ├── 2026-04-25-rf-site-planning-api-design.md     Spec v2 — source of truth (~1300 lines, 8 mermaid diagrams)
+    ├── 2026-04-25-rf-site-planning-api-design.md     Spec v2 — source of truth (~1500 lines, 9 mermaid diagrams)
     ├── 2026-04-25-analysis-requests.schema.json      JSON Schema 2020-12 for Op A–E request bodies
     ├── 2026-04-25-rf-site-planning-api.openapi.yaml  OpenAPI 3.1 — every endpoint + every entity schema
     ├── examples/
@@ -27,7 +27,7 @@ RfAnalyzer/
     │   └── asset-upload.md                            Direct + multipart asset upload
     └── seed/
         ├── README.md                                  Boot sequence + coverage notes
-        ├── standard-profile-library.json              System-owned catalog seed (18 antennas, 17 radio profiles, 21 equipment profiles, 2 clutter tables)
+        ├── standard-profile-library.json              System-owned catalog seed (21 antennas, 18 radio profiles, 23 equipment profiles, 2 clutter tables)
         ├── antenna_patterns/                          Bundled MSI Planet pattern files referenced by sha256
         └── generate_patterns.py                       Reproduction script for the pattern files
 ```
@@ -47,13 +47,13 @@ Five analysis operations, all flowing through one pluggable model registry + 12-
 ## Design surface
 
 ### Pluggable propagation models (spec §4.2 – §4.4)
-The engine ships seven plug-in models — **ITU-R P.1812**, **ITM/Longley-Rice**, **ITU-R P.528** (air-to-ground, used for Op E with drone C2), **ITU-R P.530**, **ITU-R P.526**, **free-space (Friis)**, and **two-ray ground reflection**. The auto-select strategy filters by frequency range, scores by `(operation, link_type, geometry) → scenario` suitability, and down-weights any model whose required data tier exceeds what the AOI provides. Callers may pin a specific model.
+The engine ships seven plug-in models — **ITU-R P.1812**, **ITM/Longley-Rice**, **ITU-R P.528** (air-to-ground, used for Op E with drone C2), **ITU-R P.530**, **ITU-R P.526**, **free-space (Friis)**, and **two-ray ground reflection**. The auto-select strategy filters by frequency range, scores by `(operation, link_type, geometry) → scenario` suitability via the frozen mapping table in §4.4, and down-weights any model whose required data tier exceeds what the AOI provides. Callers may pin a specific model. Bundled link-type plugins: `lora`, `lte`, `drone_c2`, `rtk`, `vhf_telemetry`.
 
 ### Adaptive geo-data fidelity (spec §5.4)
 Five tiers from `T0_FREE_SPACE` (sanity bound) to `T4_SURFACE_PLUS_BUILDINGS` (DSM + per-building loss). Each Run reports four tier values: `dominant`, `min`, `max`, and `max_possible` — the last is the best the AOI's data could support, regardless of what the run used. A run completes as `PARTIAL` rather than `COMPLETED` when fidelity is below the AOI's max possible (the engineer learns "I could have gotten more"). Callers may specify `min_fidelity_tier` (per-pixel floor) or `min_fidelity_coverage: {tier, fraction}` (coverage floor).
 
 ### Catalog with sharing and versioning (spec §3.1 – §3.2)
-Nine first-class entity types — Site, Antenna, RadioProfile, EquipmentProfile, AOIPack, ClutterTable, OperatingVolume, MeasurementSet, Comparison — plus a content-addressed Asset model. Each entity is named, versioned, optionally shared within the tenant. References use `{ref, owner, version}` with `version: int | "latest"`; cross-key references are not supported.
+Ten first-class entity types — Site, Antenna, RadioProfile, EquipmentProfile, AOIPack, ClutterTable, OperatingVolume, MeasurementSet, Comparison, RegulatoryProfile — plus a content-addressed Asset model. Each entity is named, versioned, optionally shared within the tenant. References use `{ref, owner, version}` with `version: int | "latest"`; cross-key references are not supported.
 
 A reference graph (mermaid ER diagram) lives in spec §3.6.
 
@@ -118,7 +118,7 @@ These codes are mirrored verbatim in the OpenAPI `ProblemDetail.code` enum so cl
 - Cite spec sections as `§N.M` — line numbers move when the doc evolves.
 - Timestamps: RFC 3339 UTC. Frequencies: MHz unless suffixed (`_khz`, `_ghz`). Altitudes carry an explicit `altitude_reference: "agl" | "amsl"`.
 - Hashes: SHA-256, lowercase hex; `sha256:` prefix when used as identifiers.
-- Diagrams: mermaid, embedded in the spec markdown — eight included (service topology, mode-flow sequence, asset-upload sequence, reference graph ER, run-lifecycle state, 12-stage pipeline, model auto-select, fidelity-tier resolution).
+- Diagrams: mermaid, embedded in the spec markdown — nine included (service topology, mode-flow sequence, asset-upload sequence, reference graph ER, run-lifecycle state, 12-stage pipeline, model auto-select, fidelity-tier resolution, retention timeline).
 
 See [CLAUDE.md](CLAUDE.md) for working agreements with AI assistants.
 
@@ -143,12 +143,11 @@ The design spec is canonical, but **four surfaces must agree** before the contra
 Before claiming a spec change is complete, re-run the structural validators:
 
 ```bash
-python3 -c "import yaml; yaml.safe_load(open('docs/superpowers/specs/2026-04-25-rf-site-planning-api.openapi.yaml')); print('OpenAPI OK')"
-python3 -c "import json; json.load(open('docs/superpowers/specs/2026-04-25-analysis-requests.schema.json')); print('JSON Schema OK')"
-for f in docs/superpowers/specs/seed/scenarios/*.json docs/superpowers/specs/seed/test-vectors/*.json; do
-  python3 -c "import json; json.load(open('$f'))" && echo "OK: $f" || echo "BAD: $f"
-done
+pip install pyyaml jsonschema      # one-time
+python scripts/check-sync.py
 ```
+
+The script (`scripts/check-sync.py`) loads the OpenAPI YAML, the JSON Schema, the standard profile library, and every scenario / test-vector JSON; validates every scenario's `request` block against the JSON Schema; and verifies the antenna-pattern asset manifest hashes match the bytes on disk. CI runs the same script on every PR via [`.github/workflows/spec-sync.yml`](.github/workflows/spec-sync.yml).
 
 For numerical changes touching the link-budget / propagation / polarization formulas, also re-run the golden test vectors arithmetic check (Python snippet in [`seed/test-vectors/README.md`](docs/superpowers/specs/seed/test-vectors/README.md)).
 
@@ -162,7 +161,7 @@ The same rule is duplicated in [CLAUDE.md](CLAUDE.md) for AI assistants. Treat t
 | Webhooks: signing, registration challenge, secret rotation | §2.4 |
 | Endpoint inventory | §2.5 |
 | Catalog: identity, sharing, versioning, soft-delete | §3.1 |
-| First-class entity table (9 entities) | §3.2 |
+| First-class entity table (10 entities) | §3.2 |
 | Run record fields | §3.3 |
 | Standard profile library (system-owned, shared, read-only) | §3.4 |
 | Assets — content-addressed binary blobs | §3.5 |
@@ -205,8 +204,8 @@ The same rule is duplicated in [CLAUDE.md](CLAUDE.md) for AI assistants. Treat t
 | JSON Schema | Draft 2020-12, derived from spec |
 | OpenAPI | 3.1, version `0.2.0-draft`, derived from spec |
 | Examples | 5 op walkthroughs + asset upload |
-| Seed library | 18 antennas, 17 radio profiles, 21 equipment profiles, 2 clutter tables, 2 bundled antenna-pattern asset files |
-| Diagrams | 8 mermaid (service topology, mode flow, asset upload, reference graph, run lifecycle, 12-stage pipeline, model auto-select, fidelity-tier resolution) |
+| Seed library | 21 antennas, 18 radio profiles, 23 equipment profiles, 2 clutter tables, 2 bundled antenna-pattern asset files |
+| Diagrams | 9 mermaid (service topology, mode flow, asset upload, reference graph, run lifecycle, 12-stage pipeline, model auto-select, fidelity-tier resolution, retention timeline) |
 | Auto-memory | seeded for AI-assisted continuation across sessions |
 | Implementation | Not started |
 

@@ -20,8 +20,8 @@
   "request": {
     "operation": "area",
     "tx_site":      { "ref": "ranger-camp-shingwedzi-mast" },
-    "tx_equipment": { "ref": "pmr-446mhz-whip-3dbi", "owner": "shared" },
-    "rx_template":  { "ref": "pmr-446mhz-whip-3dbi", "owner": "shared" },
+    "tx_equipment": { "ref": "pmr-446-handheld", "owner": "shared" },
+    "rx_template":  { "ref": "pmr-446-handheld", "owner": "shared" },
     "rx_altitude_override_m_agl": 1.5,
     "aoi": {
       "name": "shingwedzi-patrol-2026q2",
@@ -52,5 +52,5 @@
       "fidelity_tier_raster"
     ]
   },
-  "notes": "`pmr-446mhz-whip-3dbi` is a Radio Profile with `link_type: generic`, so stage 10 of the pipeline is a no-op — only the universal `geotiff` / `stats` / `link_budget` outputs apply. KMZ is the operationally useful artifact; a field commander loads it on a tablet running Google Earth offline. Contour levels are in dBm, ordered as the operator wants the legend."
+  "notes": "`pmr-446-handheld` is an Equipment Profile pairing the EU PMR-446 voice radio (`pmr-446-446mhz`) with the 446 MHz whip antenna. `link_type: generic`, so stage 10 of the pipeline is a no-op — only the universal `geotiff` / `stats` / `link_budget` outputs apply. KMZ is the operationally useful artifact; a field commander loads it on a tablet running Google Earth offline. Contour levels are in dBm, ordered as the operator wants the legend."
 }

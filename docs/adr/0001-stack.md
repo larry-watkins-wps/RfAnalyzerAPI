@@ -6,7 +6,7 @@
 
 ## Context
 
-RfAnalyzer is a self-hosted, single-tenant API for RF propagation analysis. The design spec is feature-complete in Draft v2; implementation has not started. The stack chosen here governs every subsequent technical decision, so it needs to fit the spec's hard requirements before code lands.
+RfAnalyzer is a self-hosted, single-tenant API for RF propagation analysis. The design spec is feature-complete (Draft v3 — ready to implement); implementation has not started. The stack chosen here governs every subsequent technical decision, so it needs to fit the spec's hard requirements before code lands.
 
 The constraints that shape the choice:
 

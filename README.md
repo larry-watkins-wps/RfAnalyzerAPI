@@ -2,7 +2,7 @@
 
 > Self-hosted, single-tenant API for RF propagation analysis. Targets field engineers placing **autonomous drone docks**, **sub-GHz IoT endpoints** (camera traps, fence/gate sensors, animal collars), **LoRa gateways**, **GNSS RTK base stations**, and **LTE backhaul** in remote/protected areas. Wildlife-protection deployments are the primary v1 driver; no spec primitive is wildlife- or vendor-specific.
 
-**Status:** Spec design phase (Draft v2 — pending user review). No implementation code yet. The design contract is complete and ready for implementation; this README is a guided tour of what's been specified.
+**Status:** Draft v3 — ready to implement. No implementation code yet, but the design contract has retired every BLOCKER/HIGH finding from the 2026-04-25 audit (see [`docs/cleanup-plan.md`](docs/cleanup-plan.md)) and the stack is locked in [ADR-0001](docs/adr/0001-stack.md). This README is a guided tour of what's been specified.
 
 ---
 
@@ -200,7 +200,7 @@ The same rule is duplicated in [CLAUDE.md](CLAUDE.md) for AI assistants. Treat t
 
 | Layer | State |
 |---|---|
-| Design spec | Draft v2 (post-examples patches), pending user review |
+| Design spec | Draft v3 — ready to implement |
 | JSON Schema | Draft 2020-12, derived from spec |
 | OpenAPI | 3.1, version `0.2.0-draft`, derived from spec |
 | Examples | 5 op walkthroughs + asset upload |

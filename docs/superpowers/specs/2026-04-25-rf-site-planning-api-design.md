@@ -1,7 +1,7 @@
 # RF Site Planning API — Design Specification
 
 **Date:** 2026-04-25
-**Status:** Draft v2 — pending user review
+**Status:** Draft v3 — ready to implement
 **Architecture approach:** Pluggable model registry + pipeline-stage engine
 **Revision note:** v2 incorporates Tx/Rx frequency authority, three-tier fidelity reporting, content-addressed assets, canonical-vs-derivative artifact model, per-class retention, and an explicit error/warning catalog. See change log at end.
 

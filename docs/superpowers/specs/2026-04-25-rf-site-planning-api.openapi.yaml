@@ -7,7 +7,7 @@ info:
   description: |
     Companion contract to design spec v2 (2026-04-25-rf-site-planning-api-design.md).
 
-    - Auth: API key in `X-Api-Key` header (§2.3).
+    - Auth: API key in the standard `Authorization: Bearer <api-key>` header (§2.3, [ADR-0002 §2](../../adr/0002-argus-alignment-and-auth.md)).
     - Sharing: per-tenant `private` / `shared` flag, no cross-key references.
     - Run lifecycle: SUBMITTED → QUEUED → RUNNING → COMPLETED|PARTIAL|FAILED|CANCELLED|EXPIRED (§8.1).
     - Storage: per-class TTLs (§8.2). Canonical artifacts persist to TTL; derivatives are 24 h cache.
@@ -22,7 +22,7 @@ servers:
         description: Deployment hostname.
 
 security:
-  - ApiKey: []
+  - BearerAuth: []
 
 tags:
   - { name: catalog,      description: Named, versioned, sharable catalog entities. }
@@ -40,6 +40,7 @@ paths:
     get:
       tags: [catalog]
       operationId: listSites
+      description: 'Required scope: `catalog.read`.'
       parameters:
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
@@ -53,6 +54,7 @@ paths:
     post:
       tags: [catalog]
       operationId: createSite
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
       responses:
         '201': { description: Created.,         content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
@@ -62,17 +64,20 @@ paths:
     get:
       tags: [catalog]
       operationId: getSite
+      description: 'Required scope: `catalog.read`.'
       responses:
         '200': { description: Site., content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [catalog]
       operationId: updateSite
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } } }
       responses: { '200': { description: Updated. }, '404': { $ref: '#/components/responses/NotFound' } }
     delete:
       tags: [catalog]
       operationId: deleteSite
+      description: 'Required scope: `catalog.write`.'
       responses: { '204': { description: Soft-deleted. }, '404': { $ref: '#/components/responses/NotFound' } }
 
   # ── Antennas ─────────────────────────────────────────────────────────
@@ -80,6 +85,7 @@ paths:
     get:
       tags: [catalog]
       operationId: listAntennas
+      description: 'Required scope: `catalog.read`.'
       parameters:
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
@@ -89,60 +95,67 @@ paths:
     post:
       tags: [catalog]
       operationId: createAntenna
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }
       responses: { '201': { description: Created. }, '400': { $ref: '#/components/responses/BadRequest' } }
   /antennas/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getAntenna,    responses: { '200': { description: Antenna., content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
-    patch:  { tags: [catalog], operationId: updateAntenna, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }, responses: { '200': { description: Updated. }, '404': { $ref: '#/components/responses/NotFound' } } }
-    delete: { tags: [catalog], operationId: deleteAntenna, responses: { '204': { description: Soft-deleted. }, '404': { $ref: '#/components/responses/NotFound' } } }
+    get:    { tags: [catalog], operationId: getAntenna, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: Antenna., content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+    patch:  { tags: [catalog], operationId: updateAntenna, description: 'Required scope: `catalog.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Antenna' } } } }, responses: { '200': { description: Updated. }, '404': { $ref: '#/components/responses/NotFound' } } }
+    delete: { tags: [catalog], operationId: deleteAntenna, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted. }, '404': { $ref: '#/components/responses/NotFound' } } }
 
   # ── Radio Profiles ───────────────────────────────────────────────────
   /radio-profiles:
     get:
       tags: [catalog]
       operationId: listRadioProfiles
+      description: 'Required scope: `catalog.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfRadioProfiles' } } } } }
     post:
       tags: [catalog]
       operationId: createRadioProfile
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } }
       responses: { '201': { description: Created. } }
   /radio-profiles/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getRadioProfile,    responses: { '200': { description: RadioProfile., content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } } } }
-    patch:  { tags: [catalog], operationId: updateRadioProfile, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [catalog], operationId: deleteRadioProfile, responses: { '204': { description: Soft-deleted. } } }
+    get:    { tags: [catalog], operationId: getRadioProfile, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: RadioProfile., content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } } } }
+    patch:  { tags: [catalog], operationId: updateRadioProfile, description: 'Required scope: `catalog.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RadioProfile' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteRadioProfile, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted. } } }
 
   # ── Equipment Profiles ───────────────────────────────────────────────
   /equipment-profiles:
     get:
       tags: [catalog]
       operationId: listEquipmentProfiles
+      description: 'Required scope: `catalog.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }, { $ref: '#/components/parameters/FilterShare' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfEquipmentProfiles' } } } } }
     post:
       tags: [catalog]
       operationId: createEquipmentProfile
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } }
       responses: { '201': { description: Created. } }
   /equipment-profiles/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getEquipmentProfile,    responses: { '200': { description: EquipmentProfile., content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } } } }
-    patch:  { tags: [catalog], operationId: updateEquipmentProfile, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [catalog], operationId: deleteEquipmentProfile, responses: { '204': { description: Soft-deleted. } } }
+    get:    { tags: [catalog], operationId: getEquipmentProfile, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: EquipmentProfile., content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } } } }
+    patch:  { tags: [catalog], operationId: updateEquipmentProfile, description: 'Required scope: `catalog.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EquipmentProfile' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteEquipmentProfile, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted. } } }
 
   # ── AOI Packs ────────────────────────────────────────────────────────
   /aoi-packs:
     get:
       tags: [catalog]
       operationId: listAOIPacks
+      description: 'Required scope: `catalog.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }, { $ref: '#/components/parameters/FilterShare' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfAOIPacks' } } } } }
     post:
       tags: [catalog]
       operationId: createAOIPack
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } }
       responses:
         '201': { description: Created.,                         content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } }
@@ -150,61 +163,68 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
   /aoi-packs/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getAOIPack,    responses: { '200': { description: AOIPack., content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } } } }
+    get:    { tags: [catalog], operationId: getAOIPack, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: AOIPack., content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } } } }
     patch:
       tags: [catalog]
       operationId: updateAOIPack
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AOIPack' } } } }
       responses: { '200': { description: Updated (e.g., to retry a failed fetched layer). } }
-    delete: { tags: [catalog], operationId: deleteAOIPack, responses: { '204': { description: Soft-deleted. } } }
+    delete: { tags: [catalog], operationId: deleteAOIPack, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted. } } }
 
   # ── Clutter Tables ───────────────────────────────────────────────────
   /clutter-tables:
     get:
       tags: [catalog]
       operationId: listClutterTables
+      description: 'Required scope: `catalog.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfClutterTables' } } } } }
     post:
       tags: [catalog]
       operationId: createClutterTable
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } }
       responses: { '201': { description: Created. } }
   /clutter-tables/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getClutterTable,    responses: { '200': { description: ClutterTable., content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } } } }
-    patch:  { tags: [catalog], operationId: updateClutterTable, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [catalog], operationId: deleteClutterTable, responses: { '204': { description: Soft-deleted. } } }
+    get:    { tags: [catalog], operationId: getClutterTable, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: ClutterTable., content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } } } }
+    patch:  { tags: [catalog], operationId: updateClutterTable, description: 'Required scope: `catalog.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClutterTable' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteClutterTable, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted. } } }
 
   # ── Operating Volumes ────────────────────────────────────────────────
   /operating-volumes:
     get:
       tags: [catalog]
       operationId: listOperatingVolumes
+      description: 'Required scope: `catalog.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }, { $ref: '#/components/parameters/FilterShare' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfOperatingVolumes' } } } } }
     post:
       tags: [catalog]
       operationId: createOperatingVolume
+      description: 'Required scope: `catalog.write`.'
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } }
       responses: { '201': { description: Created. } }
   /operating-volumes/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getOperatingVolume,    responses: { '200': { description: OperatingVolume., content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } } } }
-    patch:  { tags: [catalog], operationId: updateOperatingVolume, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [catalog], operationId: deleteOperatingVolume, responses: { '204': { description: Soft-deleted. } } }
+    get:    { tags: [catalog], operationId: getOperatingVolume, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: OperatingVolume., content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } } } }
+    patch:  { tags: [catalog], operationId: updateOperatingVolume, description: 'Required scope: `catalog.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OperatingVolume' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteOperatingVolume, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted. } } }
 
   # ── Regulatory Profiles ──────────────────────────────────────────────
   /regulatory-profiles:
     get:
       tags: [catalog]
       operationId: listRegulatoryProfiles
+      description: 'Required scope: `catalog.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfRegulatoryProfiles' } } } } }
     post:
       tags: [catalog]
       operationId: createRegulatoryProfile
       description: |
+        Required scope: `catalog.write`.
         Per-jurisdiction band/EIRP/license-class rules (spec §3.7).
         Operator-curated; the system ships no bundled regulatory profiles.
         Advisory only — does not constitute licensing advice.
@@ -212,42 +232,45 @@ paths:
       responses: { '201': { description: Created. } }
   /regulatory-profiles/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getRegulatoryProfile,    responses: { '200': { description: RegulatoryProfile., content: { application/json: { schema: { $ref: '#/components/schemas/RegulatoryProfile' } } } } } }
-    patch:  { tags: [catalog], operationId: updateRegulatoryProfile, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RegulatoryProfile' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [catalog], operationId: deleteRegulatoryProfile, responses: { '204': { description: Soft-deleted. } } }
+    get:    { tags: [catalog], operationId: getRegulatoryProfile, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: RegulatoryProfile., content: { application/json: { schema: { $ref: '#/components/schemas/RegulatoryProfile' } } } } } }
+    patch:  { tags: [catalog], operationId: updateRegulatoryProfile, description: 'Required scope: `catalog.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RegulatoryProfile' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteRegulatoryProfile, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted. } } }
 
   # ── Comparisons ──────────────────────────────────────────────────────
   /comparisons:
     get:
       tags: [catalog]
       operationId: listComparisons
+      description: 'Required scope: `catalog.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterTag' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfComparisons' } } } } }
     post:
       tags: [catalog]
       operationId: createComparison
-      description: Creating a Comparison auto-pins all referenced runs (subject to `max_pinned_runs`).
+      description: "Required scope: `catalog.write`. Creating a Comparison auto-pins all referenced runs (subject to `max_pinned_runs`)."
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } }
       responses:
         '201': { description: Created. }
         '429': { $ref: '#/components/responses/RateLimited' }
   /comparisons/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [catalog], operationId: getComparison,    responses: { '200': { description: Comparison., content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } } } }
-    patch:  { tags: [catalog], operationId: updateComparison, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [catalog], operationId: deleteComparison, responses: { '204': { description: Soft-deleted; runs unpinned unless pinned by other Comparisons or directly. } } }
+    get:    { tags: [catalog], operationId: getComparison, description: 'Required scope: `catalog.read`.',    responses: { '200': { description: Comparison., content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } } } }
+    patch:  { tags: [catalog], operationId: updateComparison, description: 'Required scope: `catalog.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Comparison' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [catalog], operationId: deleteComparison, description: 'Required scope: `catalog.write`.', responses: { '204': { description: Soft-deleted; runs unpinned unless pinned by other Comparisons or directly. } } }
 
   # ── Measurements ─────────────────────────────────────────────────────
   /measurements:
     get:
       tags: [measurements]
       operationId: listMeasurements
+      description: 'Required scope: `measurements.read`.'
       parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/FilterName' }, { $ref: '#/components/parameters/FilterShare' }]
       responses: { '200': { description: Page., content: { application/json: { schema: { $ref: '#/components/schemas/PageOfMeasurementSets' } } } } }
     post:
       tags: [measurements]
       operationId: createMeasurementSet
       description: |
+        Required scope: `measurements.write`.
         Inline JSON body or multipart CSV/GeoJSON upload up to 50 MB.
         Larger sets must be uploaded via the asset model (purpose=`measurement_csv`) and referenced by `csv_asset_ref`.
       requestBody:
@@ -260,15 +283,15 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
   /measurements/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [measurements], operationId: getMeasurementSet,    responses: { '200': { description: MeasurementSet., content: { application/json: { schema: { $ref: '#/components/schemas/MeasurementSet' } } } } } }
-    patch:  { tags: [measurements], operationId: updateMeasurementSet, requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MeasurementSet' } } } }, responses: { '200': { description: Updated. } } }
-    delete: { tags: [measurements], operationId: deleteMeasurementSet, responses: { '204': { description: Soft-deleted. } } }
+    get:    { tags: [measurements], operationId: getMeasurementSet, description: 'Required scope: `measurements.read`.',    responses: { '200': { description: MeasurementSet., content: { application/json: { schema: { $ref: '#/components/schemas/MeasurementSet' } } } } } }
+    patch:  { tags: [measurements], operationId: updateMeasurementSet, description: 'Required scope: `measurements.write`.', requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MeasurementSet' } } } }, responses: { '200': { description: Updated. } } }
+    delete: { tags: [measurements], operationId: deleteMeasurementSet, description: 'Required scope: `measurements.write`.', responses: { '204': { description: Soft-deleted. } } }
   /measurements/{id}:append:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
     post:
       tags: [measurements]
       operationId: appendMeasurements
-      description: Chunked append for ongoing telemetry. Creates a new Measurement Set version (light copy-on-write); point-level dedup by (lat, lon, altitude_m, freq_mhz, timestamp).
+      description: "Required scope: `measurements.write`. Chunked append for ongoing telemetry. Creates a new Measurement Set version (light copy-on-write); point-level dedup by (lat, lon, altitude_m, freq_mhz, timestamp)."
       parameters:
         - { in: header, name: Idempotency-Key, required: true, schema: { type: string } }
       requestBody:
@@ -286,6 +309,7 @@ paths:
       tags: [assets]
       operationId: initiateAssetUpload
       description: |
+        Required scope: `catalog.write`.
         Begin a content-addressed upload (§3.5). Returns a session document — direct PUT,
         multipart with per-part presigned URLs, or `already_exists: true` (no upload required)
         if an asset with the same SHA-256 is already in the store.
@@ -298,6 +322,7 @@ paths:
     post:
       tags: [assets]
       operationId: completeAssetUpload
+      description: 'Required scope: `catalog.write`.'
       requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/AssetCompleteRequest' } } } }
       responses:
         '200': { description: Asset finalized., content: { application/json: { schema: { $ref: '#/components/schemas/Asset' } } } }
@@ -307,6 +332,7 @@ paths:
     post:
       tags: [assets]
       operationId: abortAssetUpload
+      description: 'Required scope: `catalog.write`.'
       responses: { '204': { description: Aborted; uploaded parts reclaimed. } }
   /assets/{id}:refresh_part_urls:
     parameters: [{ in: path, name: id, required: true, schema: { $ref: '#/components/schemas/AssetId' } }]
@@ -342,6 +368,7 @@ paths:
     get:
       tags: [assets]
       operationId: getAssetMetadata
+      description: 'Required scope: `catalog.read`.'
       responses:
         '200': { description: Asset metadata., content: { application/json: { schema: { $ref: '#/components/schemas/Asset' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -351,6 +378,7 @@ paths:
     post:
       tags: [analyses]
       operationId: submitOpA
+      description: 'Required scope: `runs.submit`.'
       summary: Op A — point-to-point.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpA_P2P' } } } }
@@ -363,6 +391,7 @@ paths:
     post:
       tags: [analyses]
       operationId: submitOpB
+      description: 'Required scope: `runs.submit`.'
       summary: Op B — area heatmap.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpB_Area' } } } }
@@ -374,6 +403,7 @@ paths:
     post:
       tags: [analyses]
       operationId: submitOpC
+      description: 'Required scope: `runs.submit`.'
       summary: Op C — multi-link site report.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpC_MultiLink' } } } }
@@ -385,6 +415,7 @@ paths:
     post:
       tags: [analyses]
       operationId: submitOpD
+      description: 'Required scope: `runs.submit`.'
       summary: Op D — multi-Tx best-server.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestOpD_MultiTx' } } } }
@@ -396,6 +427,7 @@ paths:
     post:
       tags: [analyses]
       operationId: submitOpE
+      description: 'Required scope: `runs.submit`.'
       summary: Op E — 3D / volumetric coverage.
       description: |
         Op E defaults to async because most voxel runs exceed the sync budget. Callers may force sync via
@@ -418,7 +450,7 @@ paths:
     get:
       tags: [runs]
       operationId: getRun
-      description: 'Required scope: `runs.read` (plus `opsec.read_location_redacted` / `opsec.read_restricted_species` for Runs at the corresponding sensitivity class; spec §8.4, Appendix E.5).'
+      description: "Required scope: `runs.read`. Required scope: `runs.read` (plus `opsec.read_location_redacted` / `opsec.read_restricted_species` for Runs at the corresponding sensitivity class; spec §8.4, Appendix E.5)."
       responses: { '200': { description: Run record., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
     patch:
       tags: [runs]
@@ -451,6 +483,7 @@ paths:
     get:
       tags: [runs]
       operationId: getRunStatus
+      description: 'Required scope: `runs.read`.'
       responses: { '200': { description: Status with stage progress hints., content: { application/json: { schema: { $ref: '#/components/schemas/RunStatus' } } } } }
   /runs/{id}/replay:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
@@ -492,25 +525,28 @@ paths:
     post:
       tags: [runs]
       operationId: pinRun
+      description: 'Required scope: `runs.write`.'
       responses: { '200': { description: Pinned., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }, '429': { $ref: '#/components/responses/RateLimited' } }
   /runs/{id}/unpin:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
     post:
       tags: [runs]
       operationId: unpinRun
+      description: 'Required scope: `runs.write`.'
       responses: { '200': { description: Unpinned., content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } } }
   /runs/{id}/artifacts/{key}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }, { $ref: '#/components/parameters/ArtifactKey' }]
     get:
       tags: [runs]
       operationId: getArtifactMetadata
+      description: 'Required scope: `runs.read`.'
       responses: { '200': { description: Artifact reference., content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactRef' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
   /runs/{id}/artifacts/{key}/url:
     parameters: [{ $ref: '#/components/parameters/EntityId' }, { $ref: '#/components/parameters/ArtifactKey' }]
     get:
       tags: [runs]
       operationId: refreshArtifactUrl
-      description: Returns a fresh 15-minute presigned download URL.
+      description: "Required scope: `runs.read`. Returns a fresh 15-minute presigned download URL."
       responses:
         '200':
           description: Fresh URL.
@@ -528,7 +564,7 @@ paths:
     post:
       tags: [runs]
       operationId: materializeArtifact
-      description: Materializes a not-yet-built artifact (e.g., a derivative requested after submission) from the persisted canonicals.
+      description: "Required scope: `runs.read`. Materializes a not-yet-built artifact (e.g., a derivative requested after submission) from the persisted canonicals."
       requestBody:
         content:
           application/json:
@@ -543,7 +579,7 @@ paths:
     post:
       tags: [runs]
       operationId: rederiveArtifact
-      description: Produces a derivative variant from a persisted canonical without re-running propagation.
+      description: "Required scope: `runs.read`. Produces a derivative variant from a persisted canonical without re-running propagation."
       requestBody:
         required: true
         content:
@@ -579,7 +615,7 @@ paths:
     get:
       tags: [runs]
       operationId: sliceVoxel
-      description: Server-side slice of a voxel artifact. Falls back to `geotiff_stack` if `voxel` not produced.
+      description: "Required scope: `runs.read`. Server-side slice of a voxel artifact. Falls back to `geotiff_stack` if `voxel` not produced."
       responses:
         '200': { description: Slice artifact reference., content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactRef' } } } }
         '404': { description: VOXEL_NOT_AVAILABLE., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
@@ -589,24 +625,25 @@ paths:
     get:
       tags: [webhooks]
       operationId: listWebhooks
+      description: 'Required scope: `admin`.'
       responses: { '200': { description: Webhooks., content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Webhook' } } } } } }
     post:
       tags: [webhooks]
       operationId: createWebhook
-      description: Triggers a registration challenge POST to the URL; the URL must echo back the challenge within 5 s.
+      description: "Required scope: `admin`. Triggers a registration challenge POST to the URL; the URL must echo back the challenge within 5 s."
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookCreate' } } } }
       responses:
         '201': { description: Created and verified., content: { application/json: { schema: { $ref: '#/components/schemas/Webhook' } } } }
         '422': { description: Challenge failed., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
   /webhooks/{id}:
     parameters: [{ $ref: '#/components/parameters/EntityId' }]
-    get:    { tags: [webhooks], operationId: getWebhook,    responses: { '200': { description: Webhook., content: { application/json: { schema: { $ref: '#/components/schemas/Webhook' } } } } } }
-    delete: { tags: [webhooks], operationId: deleteWebhook, responses: { '204': { description: Deleted. } } }
+    get:    { tags: [webhooks], operationId: getWebhook, description: 'Required scope: `admin`.',    responses: { '200': { description: Webhook., content: { application/json: { schema: { $ref: '#/components/schemas/Webhook' } } } } } }
+    delete: { tags: [webhooks], operationId: deleteWebhook, description: 'Required scope: `admin`.', responses: { '204': { description: Deleted. } } }
   /webhooks/secrets:rotate:
     post:
       tags: [webhooks]
       operationId: rotateWebhookSecret
-      description: Issues a new HMAC secret. Old secret remains valid for 24 h to allow receiver rollover.
+      description: "Required scope: `admin`. Issues a new HMAC secret. Old secret remains valid for 24 h to allow receiver rollover."
       responses:
         '200':
           description: New secret with grace window.
@@ -646,18 +683,110 @@ paths:
             'text/plain; version=0.0.4': { schema: { type: string } }
 
 
+webhooks:
+  # OpenAPI 3.1 top-level webhooks block — each named entry describes an outbound
+  # POST the orchestrator makes against a registered `webhook_url` on a terminal
+  # Run state transition (spec §2.4). Receivers MUST verify the
+  # `X-Signature: HMAC-SHA256(secret, signed_at + "." + body)` header against
+  # the exact bytes received off the wire — see spec §2.4 for the canonicalization
+  # contract — and MUST reject `signed_at` deltas > 5 minutes from local time.
+  # Webhooks are unauthenticated by the API itself (the receiver authenticates
+  # via the HMAC); declared with `security: []` to suppress the global BearerAuth.
+  run.completed:
+    post:
+      summary: Run reached COMPLETED.
+      description: |
+        Fired when a Run reaches the COMPLETED terminal state at the AOI's maximum
+        possible fidelity tier (spec §8.1).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookDelivery' }
+      responses:
+        '200': { description: Receiver acknowledged delivery. }
+        '2XX': { description: Any 2xx is treated as ack; non-2xx triggers retry per spec §2.4. }
+  run.partial:
+    post:
+      summary: Run reached PARTIAL.
+      description: |
+        Fired when a Run reaches the PARTIAL terminal state — completed below the AOI's
+        maximum possible fidelity (spec §5.4 / §8.1). The Run record carries `warnings[]`
+        explaining why fidelity was degraded.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookDelivery' }
+      responses:
+        '200': { description: Receiver acknowledged delivery. }
+        '2XX': { description: Any 2xx is treated as ack; non-2xx triggers retry per spec §2.4. }
+  run.failed:
+    post:
+      summary: Run reached FAILED.
+      description: |
+        Fired when a Run reaches the FAILED terminal state. The delivery's `error` field
+        carries the Appendix D error code; `inputs_resolved_sha256` lets receivers correlate
+        with idempotency-key replays.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookDelivery' }
+      responses:
+        '200': { description: Receiver acknowledged delivery. }
+        '2XX': { description: Any 2xx is treated as ack; non-2xx triggers retry per spec §2.4. }
+  run.cancelled:
+    post:
+      summary: Run reached CANCELLED.
+      description: |
+        Fired when a Run reaches the CANCELLED terminal state, either by caller `DELETE`
+        or by lease/expiry sweep (spec §8.1). Note UK spelling matches the `CANCELLED` Run
+        status enum.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookDelivery' }
+      responses:
+        '200': { description: Receiver acknowledged delivery. }
+        '2XX': { description: Any 2xx is treated as ack; non-2xx triggers retry per spec §2.4. }
+  run.expired:
+    post:
+      summary: Run reached EXPIRED.
+      description: |
+        Fired when a Run reaches the EXPIRED terminal state — execution time exceeded the
+        per-op timeout or the global ceiling (spec §8.1). Tile-checkpointed runs may be
+        revived via `POST /v1/runs/{id}/resume`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookDelivery' }
+      responses:
+        '200': { description: Receiver acknowledged delivery. }
+        '2XX': { description: Any 2xx is treated as ack; non-2xx triggers retry per spec §2.4. }
+
+
 components:
 
   securitySchemes:
-    ApiKey:
-      type: apiKey
-      in:   header
-      name: X-Api-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
       description: |
-        Single-tenant API key carried in the `X-Api-Key` header. Each key has a
-        scope set assigned by the deployment operator (spec §8.4); the API rejects
-        a request whose target operation requires a scope the calling key does not
-        carry, with `403` and `code: SCOPE_INSUFFICIENT`.
+        Single-tenant API key carried in the standard `Authorization: Bearer <api-key>`
+        header (per [ADR-0002 §2](../../adr/0002-argus-alignment-and-auth.md); keys are
+        stored at rest as argon2id hashes with an 8-character prefix index, never as
+        cleartext). Each key has a scope set assigned by the deployment operator
+        (spec §8.4); the API rejects a request whose target operation requires a scope
+        the calling key does not carry, with `403` and `code: SCOPE_INSUFFICIENT`.
 
         Defined scopes:
           - catalog.read       — list/get any catalog entity
@@ -798,6 +927,57 @@ components:
             - OBSERVATION_OUT_OF_FREQ_TOLERANCE
         count:  { type: integer, minimum: 0, description: 'Number of points filtered with this reason.' }
         detail: { type: string }
+
+    PvOReport:
+      type: object
+      description: |
+        Predicted-vs-observed aggregate report block emitted per attached Measurement Set
+        when a Run carries one or more `measurement_set_refs` (spec §7.3 step 6). Multiple
+        attached sets produce multiple `PvOReport` entries on the same Run; no automatic
+        merging across sets. The report is the typed wire shape of the PvO artifact;
+        `filter_reasons[]` is populated from `FilterReason` entries enumerated in
+        Appendix D.
+      required: [measurement_set_ref, n_points_filtered_in, n_points_filtered_out, filter_reasons]
+      properties:
+        measurement_set_ref: { type: string, description: 'Reference to the Measurement Set this report is for.' }
+        n_points_filtered_in:  { type: integer, minimum: 0, description: 'Points retained after all filter passes.' }
+        n_points_filtered_out: { type: integer, minimum: 0, description: 'Points removed by any filter pass.' }
+        filter_reasons:
+          type: array
+          description: 'Per-reason counts and detail; one entry per filter code that fired.'
+          items: { $ref: '#/components/schemas/FilterReason' }
+        mean_error_db:    { type: number, description: 'observed_dbm − predicted_dbm, mean across kept points.' }
+        median_error_db:  { type: number }
+        rmse_db:          { type: number, minimum: 0 }
+        max_abs_error_db: { type: number, minimum: 0 }
+        bias_direction:
+          type: string
+          enum: [optimistic, pessimistic, balanced]
+          description: 'Sign of the mean error: predictions above (`optimistic`) or below (`pessimistic`) observed; `balanced` when the mean is within ±1 dB.'
+        worst_5_points:
+          type: array
+          description: 'Five points with the largest |error_db|; useful for spot-debugging.'
+          items:
+            type: object
+            properties:
+              lat:               { type: number }
+              lon:               { type: number }
+              altitude_m:        { type: number }
+              altitude_reference: { type: string, enum: [agl, amsl] }
+              freq_mhz:          { type: number }
+              observed_signal_dbm: { type: number }
+              predicted_signal_dbm: { type: number }
+              error_db:          { type: number }
+        per_class_summary:
+          type: array
+          description: 'Per-clutter-class error breakdown, when clutter classes are resolvable for kept points.'
+          items:
+            type: object
+            properties:
+              class_id:  { type: string }
+              n_points:  { type: integer, minimum: 0 }
+              mean_error_db: { type: number }
+              rmse_db:   { type: number, minimum: 0 }
 
     RunError:
       type: object
@@ -1375,6 +1555,10 @@ components:
         fidelity_tier_max:          { $ref: '#/components/schemas/FidelityTier' }
         fidelity_tier_max_possible: { $ref: '#/components/schemas/FidelityTier' }
         output_artifact_refs: { type: array, items: { $ref: '#/components/schemas/ArtifactRef' } }
+        pvo_reports:
+          type: array
+          description: 'Predicted-vs-observed report, one entry per attached Measurement Set (spec §7.3). Empty / absent on Runs that did not attach measurements.'
+          items: { $ref: '#/components/schemas/PvOReport' }
         warnings: { type: array, items: { type: object, properties: { code: { type: string }, detail: { type: string } } } }
         error: { $ref: '#/components/schemas/RunError' }
         pinned: { type: boolean }

@@ -53,7 +53,7 @@ The scenarios are not executed automatically; they are fixtures. To run one agai
 
 ```bash
 curl -X POST https://rf.local/v1/analyses/area \
-  -H 'X-Api-Key: $KEY' \
+  -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d "$(jq '.request' docs/superpowers/specs/seed/scenarios/rhino-vhf-collar-tracking.json)"
 ```

@@ -69,7 +69,7 @@ The system is composed of cooperating services, packaged together as a Docker Co
 
 ```mermaid
 flowchart TD
-    Caller([External Caller]) -->|HTTP/JSON + X-Api-Key| Gateway[API Gateway<br/>auth · rate-limit]
+    Caller([External Caller]) -->|HTTP/JSON + Authorization: Bearer| Gateway[API Gateway<br/>auth · rate-limit]
     Gateway --> Catalog[Catalog Service<br/>entities · sharing · refs]
     Gateway --> Orchestrator[Job Orchestrator<br/>sync routing · async lifecycle · webhooks]
     Orchestrator --> Queue[(Message Queue)]
@@ -90,7 +90,7 @@ flowchart TD
 ### 2.3 API contract shape
 
 - **Style.** REST, resource-oriented, JSON. OpenAPI-described. Versioned URL prefix (`/v1`).
-- **Auth.** API key in `X-Api-Key` header. Multiple keys per tenant; sharing flag per catalog entity grants visibility across keys within the tenant. Auth is implemented behind a pluggable adapter interface (§8.4); v1 ships only the API-key adapter.
+- **Auth.** API key in the standard `Authorization: Bearer <api-key>` header (per [ADR-0002 §2](../../adr/0002-argus-alignment-and-auth.md); keys are stored as argon2id hashes with an 8-character prefix index). Multiple keys per tenant; sharing flag per catalog entity grants visibility across keys within the tenant. Auth is implemented behind a pluggable adapter interface (§8.4); v1 ships only the bearer-key adapter.
 - **Mode selection.** Each analysis endpoint accepts `mode=sync|async|auto` (default `auto`). When `auto`, the orchestrator selects `async` if any of:
   - `operation ∈ {area, multi_link, multi_tx, voxel}`,
   - estimated output cell count > `auto_async_cell_threshold` (default **250,000**),
@@ -205,6 +205,9 @@ sequenceDiagram
 - **Tags:** free-form tags on Site, AOI Pack, Equipment Profile, Operating Volume, Comparison.
 
 ### 3.2 First-class entities (10 total)
+
+> **Inlining surface in analysis requests.** Seven of the ten entities — Site, Antenna, RadioProfile, EquipmentProfile, AOIPack, OperatingVolume, RegulatoryProfile — accept either a `Reference` or a fully inlined object inside an analysis request body (the `RefOrInlineX` shapes in the JSON Schema). The other three — **ClutterTable**, **MeasurementSet**, and **Comparison** — are deliberately reference-only at analysis-request time: ClutterTable is reached transitively via `AOIPack.clutter_table_ref` (or via inlining the AOIPack); MeasurementSet is reached via `measurement_set_refs[]` on `AnalysisCommon` and is too large to inline efficiently; Comparison is composed *from* completed Runs and never appears in an analysis request body. This is why the JSON Schema defines seven `InlineX` shapes, not ten.
+
 
 | Entity | Required fields | Notable optional fields | Purpose |
 |---|---|---|---|
@@ -1626,3 +1629,15 @@ Cross-artifact cleanup retiring the audit findings catalogued in [`docs/cleanup-
 - **OpenAPI** — new endpoints `PATCH /v1/runs/{id}` (sensitivity upgrade per Appendix E.6), `POST /v1/runs/{id}/resume`, `POST /v1/assets/{id}:refresh_part_urls`. Replay request body extended with `reclassify_on_replay`. New schemas `Sha256Hex`, `WebhookEvent`, `WebhookDelivery`, `FilterReason`. `LinkType` / `OutputKey` / `MeasurementPoint.observed_metric` enums extended with `vhf_telemetry` and the VHF outputs / metrics. `AssetSession` gains a `discriminator: mode` mapping. Op E voxel adds a 200 sync response. SHA-256 fields use `Sha256Identifier` (with `sha256:` prefix) for asset IDs and `Sha256Hex` (raw hex) for content fields.
 - **JSON Schema** — `InlineAOIPack` rebuilt around the nested-`layers` shape. `LatLonAlt` renamed `alt_m_agl` → `altitude_m`, `alt_reference` → `altitude_reference`. Op E inline alternative uses `altitude_step_m` (was `alt_step_m`). New `AOILayer` def.
 - **Seed** — added `pmr-446-446mhz` RadioProfile + `pmr-446-handheld` EquipmentProfile (replaces the broken `ranger-vhf-handheld-comms` scenario reference). Added `iot-endpoint-patch-806` and `iot-endpoint-patch-1800` antennas. Added `drone-onboard-omni-2_4ghz-2dbi` antenna and `drone-onboard-c2-2_4ghz` EquipmentProfile (replaces the broken `anti-poaching-drone-dock` rx_template reference). `lte-handset` and `camera-trap-lte-catm1-rx` re-paired with band-correct antennas. `wildlife-collar-loop-150mhz` renamed to `wildlife-collar-loop-vhf-h`. `meshtastic-ranger-camp-relay` scenario corrected to `rendered_cross_section`. Clutter attenuation unit codified as dB per 100 m everywhere.
+
+### v3 audit follow-up (2026-04-26 — second audit pass)
+
+A second consistency audit identified residual drift the prior cleanup had marked retired-on-paper. These fixes ship under the same commit; behavior unchanged:
+
+- **§2.1 mermaid, §2.3 auth bullet, OpenAPI `info.description`, OpenAPI `securitySchemes`, scenarios README curl** — wire format flipped from `X-Api-Key` to the standard `Authorization: Bearer <api-key>` per [ADR-0002 §2](../../adr/0002-argus-alignment-and-auth.md). The OpenAPI security scheme is renamed `BearerAuth` (`type: http`, `scheme: bearer`); the global `security:` block and every per-op override that previously named `ApiKey` now name `BearerAuth`. The defined-scopes block in the scheme description is unchanged. `X-Api-Key` survives only inside ADR-0002's "rejected alternatives" narrative documenting the decision.
+- **§3.2 entity table** — clarifying note that ClutterTable / MeasurementSet / Comparison are deliberately reference-only at analysis-request time, which is why the JSON Schema defines seven `InlineX` shapes rather than ten.
+- **§7.3 / OpenAPI** — new `PvOReport` schema typed and consumed by `Run.pvo_reports[]`, closing the case where `FilterReason` was defined but never referenced. The PvO report wire shape now matches the §7.3 narrative (one block per attached Measurement Set, with `filter_reasons[]: [FilterReason]`, `mean_error_db`, `rmse_db`, `bias_direction`, `worst_5_points[]`, `per_class_summary[]`).
+- **OpenAPI** — top-level `webhooks:` block added (OpenAPI 3.1) with one entry per terminal-state event (`run.completed`, `run.partial`, `run.failed`, `run.cancelled`, `run.expired`), each consuming `WebhookDelivery`. The `WebhookDelivery` schema is no longer an orphan; receivers can generate typed handlers from the OpenAPI.
+- **OpenAPI** — every operation now carries a `description` that names its required scope per spec §2.5 (`Required scope: catalog.read` etc.), in addition to the global `security: - BearerAuth: []` enforcement. 82 operations updated; `/healthz`, `/readyz`, `/metrics` retain `security: []`.
+- **`docs/cleanup-plan.md` footer** — names the followup commit (`e1579f2`).
+- **`docs/adr/README.md`** — index table extended with the ADR-0002 row.

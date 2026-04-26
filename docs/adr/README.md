@@ -7,3 +7,4 @@ Numbered sequentially. Once accepted, an ADR is immutable — supersede it with 
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-stack.md) | Implementation stack (Python 3.12 + FastAPI + pydantic v2) | Accepted |
+| [0002](0002-argus-alignment-and-auth.md) | Argus alignment, auth model (`Authorization: Bearer` + argon2id), logging redaction | Accepted (supersedes parts of 0001) |

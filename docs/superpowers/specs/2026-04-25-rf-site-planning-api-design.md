@@ -231,7 +231,7 @@ A Run is a first-class persisted record but not a catalog entity (no name-based 
 - `mode_requested` (`sync` / `async` / `auto`), `mode_executed` (`sync` / `async`)
 - `inputs_resolved` — frozen, fully-inlined snapshot of every reference at the freeze point
 - `inputs_resolved_sha256` — SHA-256 of the **canonicalized** `inputs_resolved`, used by opt-in dedup (§8.2) and by replay/idempotency comparisons. Canonicalization rule: **RFC 8785 (JSON Canonicalization Scheme — JCS)**. Specifically: UTF-8 encoding, NFC string normalization, lexicographic key ordering, no insignificant whitespace, JSON Number serialization per JCS §3.2.2.3 (which forces a canonical double-to-string form for all floats — operators that round-trip floats through alternative serializers will produce a different hash). Implementations MUST use `rfc8785` (the Python reference implementer of RFC 8785) or a binary-equivalent strict RFC 8785 library; rolling a JCS encoder by hand is not permitted. A golden vector for the canonicalization rule lives at [`seed/test-vectors/canonicalization-vector.json`](seed/test-vectors/canonicalization-vector.json); the `expected_sha256` carried there is a placeholder pending the first conformant implementation, which fills it from a real run of the chosen library — every subsequent implementation MUST match the same hash for the same `input` payload.
-- `engine_version`, `engine_major`, `models_used[]` (with model plugin versions and `plugin_major` per entry), `data_layer_versions`
+- `engine_version`, `engine_major`, `models_used[]` (one entry per propagation- and link-type model that ran; each carries `id`, `name`, `version`, `plugin_major`, **`license`** (SPDX), and **`provenance`** — the latter two copied from `ModelCapabilities` so every Run is license-auditable from its record alone, without operators having to read plugin source. Core-bundled models record `license: "MIT"`, `provenance: "in-house implementation"` per [ADR-0003](../../adr/0003-propagation-model-registry.md).), `data_layer_versions`
 - `fidelity_tier_dominant`, `fidelity_tier_min`, `fidelity_tier_max`, `fidelity_tier_max_possible`
 - `output_artifact_refs[]` — see §8.9 for shape
 - `warnings[]`, `error` (if failed) — codes per Appendix D. `error` is a `RunError` record `{code, detail, plugin?, stage?, cause_chain?}` (OpenAPI `RunError` schema), not a `ProblemDetail` — the latter is the HTTP-response shape and carries an HTTP `status` field that has no meaning for a stored Run failure.
@@ -501,10 +501,26 @@ Every propagation model is a plugin implementing:
 
 ```
 ModelCapabilities {
-  name: str                            # e.g., "ITU-R P.1812"
+  id: str                              # ^[a-z0-9_]+$ ; pin name and collision key
+                                       # (e.g., "p1812", "itm", "p528"); the
+                                       # `propagation_model` enum at §4.4 is the
+                                       # union of registered ids plus `auto`.
+  name: str                            # human-readable; e.g., "ITU-R P.1812-7"
   version: str                         # plugin semver
   plugin_major: int                    # extracted from version; replay compares this
   compatible_engine_majors: [int]      # the engine majors this plugin supports
+  license: str                         # SPDX id, MANDATORY ("MIT", "Apache-2.0",
+                                       # "PD" for public domain, "GPL-3.0", ...).
+                                       # Plugin fails to register if absent.
+  provenance: str                      # MANDATORY free-text origin, e.g.,
+                                       # "in-house implementation",
+                                       # "ported from NTIA ITS itm v1.4.1 (public domain)",
+                                       # "ported from crc-covlib v1.x (MIT)".
+                                       # Surfaced in `Run.models_used[]` for license audit.
+  runtime: enum {                      # affects packaging and the future sandboxing ADR
+     "pure_python",
+     "native_extension"                # cffi / C extension / compiled wheel
+  }
   freq_range_mhz: (min, max)
   scenario_suitability: {              # closed enum (§4.4)
      terrestrial_p2p: float,           # 0..1 score, 0 = not suitable
@@ -542,11 +558,15 @@ ModelInterface {
 
 **Lifecycle.** `init` runs once at API startup; plugins register themselves via Python entry points (`importlib.metadata`). `validate_inputs` runs during pipeline Stage 2 for every Run; `predict` runs during Stage 8. `teardown` runs at API shutdown. There is no hot reload in v1 — to add or upgrade a plugin, restart the API.
 
-**Loading order and ID collisions.** At startup the engine enumerates every entry-point-registered propagation-model plugin and orders them alphabetically by entry-point name. The deployment may override the order with the `RFANALYZER_PLUGIN_ORDER` environment variable (a comma-separated list of entry-point names; unlisted plugins follow alphabetically after listed ones). If two plugins register the same `propagation_model_id`, the API **fails to start** with a clear log line naming both plugins and the colliding ID — first-loaded does not silently win. The same rule applies to link-type plugins (§4.6) for `link_type` values.
+**Loading order and ID collisions.** At startup the engine enumerates every entry-point-registered propagation-model plugin and orders them alphabetically by entry-point name. The deployment may override the order with the `RFANALYZER_PLUGIN_ORDER` environment variable (a comma-separated list of entry-point names; unlisted plugins follow alphabetically after listed ones). If two plugins register the same `id`, the API **fails to start** with a clear log line naming both plugins and the colliding `id` — first-loaded does not silently win. The same rule applies to link-type plugins (§4.6) for `link_type` values.
 
-**Sandboxing.** Plugins run in-process. A misbehaving plugin can crash a worker; the orchestrator retries the affected Run on a different worker once before marking it `FAILED` with `MODEL_PLUGIN_CRASH`. Sandboxing for untrusted third-party plugins is deferred to a future ADR; v1 onboards only first-party-reviewed plugins.
+**Third-party plugin allowlist.** Entry points outside the deployment's `plugins.propagation_models.allowlist` (deployment-config schema; default closed via `allow_third_party: false`) are **logged and skipped** at registration — not a startup failure, so a typo in the allowlist does not brick a deployment. This is the enforceable form of "v1 onboards only first-party-reviewed plugins"; see [ADR-0003](../../adr/0003-propagation-model-registry.md) for rationale.
+
+**Sandboxing.** Plugins run in-process. A misbehaving plugin can crash a worker; the orchestrator retries the affected Run on a different worker once before marking it `FAILED` with `MODEL_PLUGIN_CRASH`. Sandboxing for untrusted third-party plugins is deferred to a future ADR; v1 onboards only first-party-reviewed plugins. Architectural rationale for the registry: [ADR-0003](../../adr/0003-propagation-model-registry.md).
 
 **Versioning & replay.** A plugin's `version` and `plugin_major` flow through `Run.models_used[]`. On replay, per-plugin major drift between the original Run and the current registered plugin set is detected; cross-major replay requires `force_replay_across_major: true`. Drift emits the warning `MODEL_PLUGIN_MAJOR_DRIFT` (or, for link-type plugins, `LINK_TYPE_PLUGIN_MAJOR_DRIFT`) on the resulting Run with an explicit `replay_plugin_major_drift[]` entry.
+
+**Core-bundled models (non-removable).** Free-space (Friis) and two-ray ground reflection are implemented in core, always available, and **not subject to the plugin lifecycle** — they do not load via entry points, do not participate in plugin-major drift, are exempt from the third-party allowlist, and cannot raise `MODEL_PLUGIN_CRASH`. They parallel the `generic` link-type at §4.6: trivial closed-form math that is always present as the auto-select fallback when nothing else is suitable. A deployment with every plugin disabled still has working sanity-bound (`free_space`) and short-range (`two_ray`) models. Their `ModelCapabilities` records are emitted by the core engine itself with `license: "MIT"`, `provenance: "in-house implementation"`, and `runtime: "pure_python"`.
 
 ### 4.3 Models supported
 
@@ -1203,7 +1223,7 @@ flowchart LR
 
 ### 8.3 Reproducibility
 
-- Every Run records `engine_version`, `engine_major`, `models_used` (with `name`, `version`, `plugin_major` per entry — covering both propagation and link-type plugins), `data_layer_versions` (per-layer source + version + `content_sha256`), and `inputs_resolved` (full inlined snapshot of all referenced entities; asset references appear as immutable `sha256:` content hashes).
+- Every Run records `engine_version`, `engine_major`, `models_used` (with `id`, `name`, `version`, `plugin_major`, `license` (SPDX), and `provenance` per entry — covering both propagation and link-type plugins; `license` and `provenance` make each Run license-auditable from the record alone, per [ADR-0003](../../adr/0003-propagation-model-registry.md)), `data_layer_versions` (per-layer source + version + `content_sha256`), and `inputs_resolved` (full inlined snapshot of all referenced entities; asset references appear as immutable `sha256:` content hashes).
 - `inputs_resolved_sha256` uses RFC 8785 (JCS) canonicalization (§3.3). Two implementations producing different bytes for the same logical Run is a bug — see the golden vector in [`seed/test-vectors/canonicalization-vector.json`](seed/test-vectors/canonicalization-vector.json).
 - `POST /v1/runs/{id}/replay` resubmits the run with the same inputs against the engine version pinned in the original run's `engine_major` and the plugin majors pinned in the original run's `models_used[].plugin_major`. The new Run record links via `replay_of_run_id`.
 - **Engine major drift** at replay time fails with `REPLAY_ACROSS_ENGINE_MAJOR` unless `force_replay_across_major: true` is set. The new Run records `replay_engine_major_drift: "<old → new>"`.
@@ -1641,3 +1661,16 @@ A second consistency audit identified residual drift the prior cleanup had marke
 - **OpenAPI** — every operation now carries a `description` that names its required scope per spec §2.5 (`Required scope: catalog.read` etc.), in addition to the global `security: - BearerAuth: []` enforcement. 82 operations updated; `/healthz`, `/readyz`, `/metrics` retain `security: []`.
 - **`docs/cleanup-plan.md` footer** — names the followup commit (`e1579f2`).
 - **`docs/adr/README.md`** — index table extended with the ADR-0002 row.
+
+### Propagation-model registry justification (2026-04-27)
+
+Architectural rationale for the registry, prompted by the v1 implementation strategy spanning three license tiers (in-house MIT for free-space / two-ray / P.526 / P.530; public-domain port for ITM / P.528; MIT crc-covlib port for P.1812). Behavior unchanged; the four amendments below are additive and codify what §4.2 already implies.
+
+- **[ADR-0003 (new)](../../adr/0003-propagation-model-registry.md)** — pluggable propagation-model registry rationale. Records the forces driving a registry over hardcoded dispatch (license heterogeneity, runtime heterogeneity, replay reproducibility, auto-select scoring, future sandboxing, third-party extensions), the rejected alternatives (hardcoded dispatch, subprocess IPC, WASM-now, default-open allowlist), and locks in the four §4.2 / §3.3 amendments below. Supersedes-in-part ADR-0001's "Plugin loading" stack-table row.
+- **§4.2 `ModelCapabilities`** — gains `id` (regex `^[a-z0-9_]+$`; the previously-implicit "propagation_model_id" referenced by the collision check is now explicit), `license` (SPDX, mandatory), `provenance` (free-text origin, mandatory), `runtime` (`pure_python` | `native_extension`). A plugin that fails to declare `license` or `provenance` fails registration.
+- **§4.2 (new "Core-bundled models" subsection)** — free-space and two-ray are implemented in core, always available, and **not subject to the plugin lifecycle** (no entry-point loading, no plugin-major drift, exempt from the third-party allowlist, cannot raise `MODEL_PLUGIN_CRASH`). They parallel the `generic` link-type at §4.6. A deployment with every plugin disabled retains working sanity-bound and short-range models.
+- **§4.2 (sandboxing paragraph) / §4.2 (new "Third-party plugin allowlist" paragraph)** — cross-references ADR-0003. Allowlist enforcement codified: entry points outside `plugins.propagation_models.allowlist` are logged and skipped (not a startup failure). `RFANALYZER_PLUGIN_ORDER` and the collision-check ID are unchanged in behavior; the latter now references the explicit `id` field.
+- **§3.3 / §8.3 / OpenAPI `Run.models_used[]`** — items gain `id`, `license`, and `provenance`, copied from `ModelCapabilities` at registration time. Every Run is now license-auditable from its record alone, without operators having to read plugin source.
+- **Deployment-config schema (`plugins.propagation_models`)** — new block `{ allow_third_party: false, allowlist: [...] }`. Default-closed lists the v1 base-pack entry-point names (`rfanalyzer.models.{p1812,itm,p528,p526,p530}`); free-space and two-ray are core-bundled and not represented. Default-closed prevents an arbitrary `pip install`ed plugin from running in the engine process before sandboxing lands.
+- **README §49** — one-line back-reference to ADR-0003.
+- **Deferred follow-ups (called out in ADR-0003, not landed in this commit):** `GET /v1/models` endpoint (the per-Run audit surface is sufficient for v1); the sandboxing ADR; operator guidance for installing GPL-licensed plugins.

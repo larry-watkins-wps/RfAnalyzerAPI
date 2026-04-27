@@ -1540,15 +1540,18 @@ components:
         engine_major:   { type: integer }
         models_used:
           type: array
-          description: 'Per-plugin record (both propagation models and link-type plugins). `plugin_major` is read by the replay-major-drift logic in §3.3 / §8.3.'
+          description: 'Per-plugin record (both propagation models and link-type plugins). `plugin_major` is read by the replay-major-drift logic in §3.3 / §8.3. `license` and `provenance` make each Run license-auditable from the record alone (ADR-0003). Core-bundled models (free-space, two-ray) record `license: "MIT"`, `provenance: "in-house implementation"`.'
           items:
             type: object
-            required: [name, version, plugin_major]
+            required: [name, version, plugin_major, license, provenance]
             properties:
-              name:           { type: string, description: 'Plugin name (e.g., "ITU-R P.1812", "lora").' }
+              id:             { type: string, pattern: '^[a-z0-9_]+$', description: 'Plugin id (matches the `propagation_model` enum value, or the `link_type` value for link-type plugins).' }
+              name:           { type: string, description: 'Plugin human-readable name (e.g., "ITU-R P.1812-7", "lora").' }
               version:        { type: string, description: 'Plugin semver string.' }
               plugin_major:   { type: integer, minimum: 0, description: 'Major version extracted from `version`; replay compares this.' }
               plugin_version: { type: string, description: 'Alias for `version` retained for clarity in cross-language clients.' }
+              license:        { type: string, description: 'SPDX id (e.g., "MIT", "Apache-2.0", "PD"). Mandatory; copied from `ModelCapabilities.license`. See ADR-0003.' }
+              provenance:     { type: string, description: 'Free-text origin (e.g., "in-house implementation", "ported from NTIA ITS itm v1.4.1 (public domain)", "ported from crc-covlib v1.x (MIT)"). Mandatory; copied from `ModelCapabilities.provenance`. See ADR-0003.' }
         data_layer_versions: { type: array, items: { type: object } }
         fidelity_tier_dominant:     { $ref: '#/components/schemas/FidelityTier' }
         fidelity_tier_min:          { $ref: '#/components/schemas/FidelityTier' }

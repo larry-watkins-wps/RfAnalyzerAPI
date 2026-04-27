@@ -266,6 +266,30 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
           "description": "Auto-select tiebreak preference order on equal `scenario_suitability` score (spec §4.4 step 5)."
+        },
+        "propagation_models": {
+          "type": "object",
+          "description": "Third-party-plugin allowlist for the propagation-model registry (ADR-0003). Enforces spec §4.2's 'v1 onboards only first-party-reviewed plugins' stance at runtime. Core-bundled models (free-space, two-ray) are not subject to this gate.",
+          "additionalProperties": false,
+          "properties": {
+            "allow_third_party": {
+              "type": "boolean",
+              "default": false,
+              "description": "When false (default), only entry points whose name appears in `allowlist` are registered; others are logged and skipped at startup. When true, every entry point loads regardless of allowlist membership. Default-closed prevents an arbitrary `pip install`ed plugin from running in the engine process before sandboxing lands."
+            },
+            "allowlist": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "default": [
+                "rfanalyzer.models.p1812",
+                "rfanalyzer.models.itm",
+                "rfanalyzer.models.p528",
+                "rfanalyzer.models.p526",
+                "rfanalyzer.models.p530"
+              ],
+              "description": "Entry-point names trusted by this deployment. Entry points outside this list are logged and skipped (not a startup failure — a typo must not brick the deployment). The default lists the v1 base-pack plugins; free-space and two-ray are core-bundled and not represented here."
+            }
+          }
         }
       }
     },

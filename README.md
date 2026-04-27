@@ -6,6 +6,62 @@
 
 ---
 
+## Why implement this
+
+### The problem
+
+Wildlife protection deployments depend on RF hardware — VHF collars, LoRa camera traps, fence-cut sensors, autonomous drone docks, LTE backhaul, GNSS RTK base stations — placed in landscapes where terrain, vegetation, cross-border regulation, and operational sensitivity all matter. Today that planning falls to proprietary desktop tools (Pathloss, ATDI, EDX) that:
+
+- Require expensive licenses and Windows desktop environments
+- Have no concept of operational security — no coordinate redaction, no restricted-species handling
+- Have no integration with the systems field teams actually use (EarthRanger, wpsWatch, Argus Flight Center)
+- Produce results with no reproducibility guarantee — a coverage map cited in a management plan cannot be re-derived
+
+Generic open-source alternatives (Splat!, bare ITM/Longley-Rice ports) are single-model, have no pipeline, no asset lifecycle, no provenance, and no ops integration.
+
+### How this API closes the gaps
+
+**Self-hosted and offline-capable.** A Docker Compose stack with a bundled global geo baseline (SRTM-30 DTM + ESA WorldCover). No external API dependencies once seeded — viable in a ranger camp on intermittent satellite connectivity.
+
+**Conservation hardware built in from day one.** The seed library ships 23 equipment profiles for conservation gear out of the box: VHF collars (large and small mammal), LoRa body-worn collars, camera-trap endpoints, fence/gate sensors, acoustic gunshot/chainsaw classifiers, drone-dock and airborne C2 profiles, ranger Meshtastic nodes, AIS marine trackers. Twelve runnable seed scenarios cover real protected areas and real operational questions — from rhino collar coverage in North Luangwa, Zambia to anti-poaching drone dock siting near Kruger to transboundary LoRa monitoring across the KAZA wildlife corridor.
+
+**OPSEC by construction, not by policy.** Conservation deployments produce artifacts whose disclosure carries real-world risk: a GeoTIFF of a rhino dehorning site, a KMZ tracing an anti-poaching drone patrol route, a link budget listing the frequency of a collared animal. The API implements a four-class sensitivity model (`public` / `org_internal` / `location_redacted` / `restricted_species`), auto-classifies runs whose geometry intersects configured sanctuary polygons (warning: `OPSEC_AUTO_CLASSIFIED`), and only delivers restricted-species webhooks to an allowlisted URL set — without requiring the submitting analyst to know the polygon. See spec Appendix E.
+
+**Reproducible, citable results.** Every Run freezes an `inputs_resolved` snapshot at SUBMITTED, hashed via RFC 8785 canonical SHA-256. Engine version, plugin versions, and geo-data-layer versions are all recorded. `POST /v1/runs/{id}/replay` reruns identically. A coverage map submitted in a management plan or court filing can be re-derived bit-for-bit.
+
+**Designed to integrate with Argus Flight Center, EarthRanger, and wpsWatch.** Argus Flight Center is the primary downstream consumer; ADR-0002 is dedicated to that alignment — shared Postgres image (`postgis/postgis:16-3.4`), matched bearer auth wire format, and identical logging field shape for cross-service log aggregation. A generated TypeScript client (`openapi-typescript` + `openapi-fetch`) is the contract Argus consumes directly from the OpenAPI; no hand-written wrapper. The four-class OPSEC model and allowlisted webhook delivery are shaped for the same operational-security posture EarthRanger and wpsWatch require for active-operation data.
+
+**Drone-dock siting as a first-class operation.** Op E (3D / volumetric) computes received power at every `(lat, lon, altitude)` point across an operating volume using ITU-R P.528 (air-to-ground). The `home_site_ref` field on `OperatingVolume` anchors return-to-home analysis; the engine flags voxels where the RTH leg would not close. `c2_pass_fail` and `c2_range_envelope` artifacts are first-class outputs. There is no off-the-shelf open-source substitute that provides this for conservation budgets.
+
+**Pluggable and open.** Propagation models and link types load via Python entry points (`importlib.metadata`). The spec-first design with four-surface CI sync means contributors can read the full contract before reading code, and PRs that introduce drift are rejected automatically.
+
+### Twelve conservation seed scenarios
+
+Every seed scenario is a runnable API fixture pinned to a real protected area:
+
+| Scenario | Op | Location | Use |
+|---|---|---|---|
+| `rhino-vhf-collar-tracking` | B — area | Mfolozi, South Africa | Detection probability and DF bearing quality for a VHF rhino collar |
+| `rhino-lora-collar-coverage` | D — multi-Tx | North Luangwa, Zambia | 3 gateway candidates for LoRa collar uplinks on reintroduced black rhinos |
+| `anti-poaching-drone-dock` | E — voxel | Near Kruger | 2 dock candidates, 2.4 GHz C2, 60–150 m AGL anti-poaching patrol envelope |
+| `fence-line-lora-monitoring` | D — multi-Tx | Kruger perimeter | 4 mast candidates for LoRa fence-cut sensors along a 60 km perimeter |
+| `camera-trap-mesh-coverage` | C — multi-link | (Reserve) | Multi-link site report: LoRa + LTE + VHF colocated at a single tower |
+| `acoustic-detector-mesh-salonga` | D — multi-Tx | Salonga NP, DRC | LoRa acoustic gunshot/chainsaw classifiers; 3 ranger-post gateway candidates |
+| `marine-ais-patrol-bazaruto` | B — area | Bazaruto, Mozambique | AIS coverage for the patrol fleet and artisanal-fisher exemption zone |
+| `meshtastic-ranger-camp-relay` | A — P2P | Hwange NP, Zimbabwe | Meshtastic 915 MHz link between two ranger camps — ridge repeater needed? |
+| `boundary-rtk-survey` | A — P2P | (Reserve) | RTK correction link for a GNSS boundary survey |
+| `ranger-vhf-handheld-comms` | B — area | (Reserve) | PMR-446 MHz patrol-area heatmap for ranger voice radio |
+| `vehicle-tracker-patrol-road` | B — area | (Reserve) | LoRa 868 MHz vehicle-tracker coverage along patrol road corridors |
+| `multi-jurisdictional-iot` | B — area | KAZA (BW/ZW border) | Transboundary LoRa camera-trap coverage across a 5-country wildlife corridor |
+
+`restricted_species` scenarios (`rhino-*`, `anti-poaching-drone-dock`) return 404 to callers without the `opsec.read_restricted_species` scope.
+
+### Open source
+
+The project is intended for open-source release under Apache-2.0. A license file has not been added yet — that is a prerequisite step before public publication. One caution: the `restricted_species_polygons` that trigger OPSEC auto-classification are deployment-config (in `deployment-config.schema.json`), never committed to the repo — this policy is worth explicitly documenting in a `SECURITY.md` before publishing seed scenarios that name real reserves.
+
+---
+
 ## Repository contents
 
 ```

@@ -14,7 +14,7 @@ Wildlife protection deployments depend on RF hardware — VHF collars, LoRa came
 
 - Require expensive licenses and Windows desktop environments
 - Have no concept of operational security — no coordinate redaction, no restricted-species handling
-- Have no integration with the systems field teams actually use (EarthRanger, wpsWatch, Argus Flight Center)
+- Have no integration with the systems field teams actually use (EarthRanger, wpsWatch, ARGUS Flight Center)
 - Produce results with no reproducibility guarantee — a coverage map cited in a management plan cannot be re-derived
 
 Generic open-source alternatives (Splat!, bare ITM/Longley-Rice ports) are single-model, have no pipeline, no asset lifecycle, no provenance, and no ops integration.
@@ -29,7 +29,7 @@ Generic open-source alternatives (Splat!, bare ITM/Longley-Rice ports) are singl
 
 **Reproducible, citable results.** Every Run freezes an `inputs_resolved` snapshot at SUBMITTED, hashed via RFC 8785 canonical SHA-256. Engine version, plugin versions, and geo-data-layer versions are all recorded. `POST /v1/runs/{id}/replay` reruns identically. A coverage map submitted in a management plan or court filing can be re-derived bit-for-bit.
 
-**Designed to integrate with Argus Flight Center, EarthRanger, and wpsWatch.** Argus Flight Center is the primary downstream consumer; ADR-0002 is dedicated to that alignment — shared Postgres image (`postgis/postgis:16-3.4`), matched bearer auth wire format, and identical logging field shape for cross-service log aggregation. A generated TypeScript client (`openapi-typescript` + `openapi-fetch`) is the contract Argus consumes directly from the OpenAPI; no hand-written wrapper. The four-class OPSEC model and allowlisted webhook delivery are shaped for the same operational-security posture EarthRanger and wpsWatch require for active-operation data.
+**Designed to integrate with ARGUS Flight Center, EarthRanger, and wpsWatch.** ARGUS Flight Center is the primary downstream consumer; ADR-0002 is dedicated to that alignment — shared Postgres image (`postgis/postgis:16-3.4`), matched bearer auth wire format, and identical logging field shape for cross-service log aggregation. A generated TypeScript client (`openapi-typescript` + `openapi-fetch`) is the contract ARGUS consumes directly from the OpenAPI; no hand-written wrapper. The four-class OPSEC model and allowlisted webhook delivery are shaped for the same operational-security posture EarthRanger and wpsWatch require for active-operation data.
 
 **Drone-dock siting as a first-class operation.** Op E (3D / volumetric) computes received power at every `(lat, lon, altitude)` point across an operating volume using ITU-R P.528 (air-to-ground). The `home_site_ref` field on `OperatingVolume` anchors return-to-home analysis; the engine flags voxels where the RTH leg would not close. `c2_pass_fail` and `c2_range_envelope` artifacts are first-class outputs. There is no off-the-shelf open-source substitute that provides this for conservation budgets.
 

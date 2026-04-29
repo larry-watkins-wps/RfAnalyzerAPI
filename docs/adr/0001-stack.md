@@ -41,7 +41,7 @@ The constraints that shape the choice:
 | Plugin loading | **Python entry points** (`importlib.metadata`) for both propagation models and link-type plugins | Stdlib mechanism, no custom plugin loader to maintain. Sandboxing deferred to a future ADR. |
 | Containerization | Multi-stage Dockerfile (slim base, no compile toolchain in runtime layer); Docker Compose for dev with services: api, worker, postgres, minio | Mirrors argus's compose layout where the services overlap (postgres, minio). |
 | CI | GitHub Actions: lint → typecheck → unit → integration → Schemathesis-fuzz-against-OpenAPI | Integration tests use real Postgres + MinIO via service containers, matching argus's pattern. |
-| Client SDK | **`openapi-typescript` + `openapi-fetch`** generates a typed TS client published as a private package; argus imports it | Hand-written clients drift; generated clients track the OpenAPI. |
+| Client SDK | **`openapi-typescript` + `openapi-fetch`** generates a typed TS client; the generated artifact is committed directly into argus-flight-center (no registry, no package publication) | Hand-written clients drift; generated clients track the OpenAPI. Vendoring the artifact rather than publishing avoids running a private registry for a two-service ecosystem. |
 
 ## Alternatives considered
 
@@ -91,5 +91,5 @@ Rejected. FastAPI is the de-facto standard for pydantic-backed Python APIs; the 
 3. [ ] Wire CI: lint → typecheck → unit → integration → Schemathesis fuzz.
 4. [ ] Create the `StorageProvider` interface with filesystem and S3 implementations (mirror argus's `src/lib/storage.ts` shape).
 5. [ ] Set up the OpenAPI emission check: pydantic-emitted OpenAPI is diffed against the spec-derived OpenAPI; CI fails on divergence.
-6. [ ] Publish the first generated TS client to a private registry and add it as a dependency in argus-flight-center.
+6. [ ] Generate the first TS client from the published OpenAPI and vendor it into argus-flight-center (commit the generated source under `argus-flight-center/src/lib/rfanalyzer-client/`); no registry, no package publication.
 7. [ ] Plugin sandboxing ADR — open once the first third-party plugin candidate appears (note: the auth, Postgres-image, and logging-redaction items previously listed here are answered by [ADR-0002](0002-argus-alignment-and-auth.md); see ADR-0002's own action items for the implementation tasks).
